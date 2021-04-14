@@ -9,7 +9,7 @@ Installs and configures `nftables`, `ssh`, `openvpn`, `cloudflared` and `Pihole`
 The script installs arch for Raspberry Pi 4 on the passed SD card:
 
 ```console
-# setup_sd /dev/mmcblk0
+$ setup_sd /dev/mmcblk0
 ```
 
 ## Install server
