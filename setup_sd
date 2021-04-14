@@ -54,6 +54,12 @@ function main() {
 	sudo cp -a install .env.example etc/ root/root/
 	sudo chown -R root:root root/root/install root/root/.env.example root/root/etc/
 
+	# Also copy .env if it's already been configured
+	if [[ -f .env ]]; then
+		sudo cp .env root/root/
+		sudo chown -R root:root root/root/.env
+	fi
+
 	sudo umount root/boot/ root/
 	rmdir root
 
