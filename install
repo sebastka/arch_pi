@@ -177,7 +177,7 @@ function install_openvpn() {
 }
 
 #######################################
-#       Install Pi-hole               #
+#       Install Pihole               #
 #######################################
 function install_pihole() {
 	pacman -S pi-hole-server php7 php7-cgi php7-fpm php7-sqlite lighttpd

@@ -51,8 +51,8 @@ function main() {
 	sudo vim root/etc/systemd/network/eth0.network
 
 	# Copy config and install script to root's home folder
-	sudo cp -a install etc/ root/root/
-	sudo chown -R root:root root/root/etc/ root/root/install
+	sudo cp -a install .env.example etc/ root/root/
+	sudo chown -R root:root root/root/install root/root/.env.example root/root/etc/
 
 	sudo umount root/boot/ root/
 	rmdir root
