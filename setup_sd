@@ -1,0 +1,69 @@
+#!/bin/bash
+set -e
+
+#######################################
+#	Setup SD card with arch for ARMv7
+#	https://archlinuxarm.org/platforms/armv8/broadcom/raspberry-pi-4
+#
+#	Arguments:
+#		sd (string): path to SD card
+#	Returns:
+#		1 upon error
+#		0 otherwise
+#######################################
+function main() {
+	local readonly USAGE="Usage: setup_sd sd"
+
+	if [[ "${#}" -ne 1 ]]; then
+		err "Error: one argument required"
+		err "${USAGE}"
+		return 1
+	fi
+
+	SD="${1}"
+	warn "The following device wil be wiped. Continue? ${SD}"
+
+	# Prepare partitions
+	sudo bash -c "echo -e \"o\nn\np\n1\n\n+200M\nt\nc\nn\np\n2\n\n\n\nw\" | fdisk ${SD}" # Sorry \_(˚-˚)_/
+	sudo mkfs.vfat "${SD}p1"
+	sudo mkfs.ext4 "${SD}p2"
+
+	# Mount
+	mkdir -p root/ && sudo mount "${SD}p2" root/
+	sudo mkdir -p root/boot && sudo mount "${SD}p1" root/boot/
+
+	# Get img and copy to sd
+	[[ ! -f "ArchLinuxARM-rpi-4-latest.tar.gz" ]] && wget "http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-4-latest.tar.gz"
+	sudo bsdtar -xpf "ArchLinuxARM-rpi-4-latest.tar.gz" -C root
+
+	# aarch64
+	#[[ ! -f "ArchLinuxARM-rpi-aarch64-latest.tar.gz" ]] && wget "http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz"
+	#sudo bsdtar -xpf "ArchLinuxARM-rpi-aarch64-latest.tar.gz" -C root
+	#sed -i 's/mmcblk0/mmcblk1/g' root/etc/fstab
+
+	sudo sync
+
+	# Set up static ip
+	warn "Please set up a static IP for the PI"
+	nconfig="[Match]\nName=eth0\n\n[Network]\nDHCP=no\nAddress=10.7.0.2/24\nGateway=10.7.0.1\nDNS=1.1.1.1\nDNS=1.0.0.1\nDNSSEC=no\n"
+
+	sudo bash -c "echo -e \"${nconfig}\" > root/etc/systemd/network/eth0.network"
+	sudo vim root/etc/systemd/network/eth0.network
+
+	# Copy config and install script to root's home folder
+	sudo cp -a install etc/ root/root/
+	sudo chown -R root:root root/root/etc/ root/root/install
+
+	sudo umount root/boot/ root/
+	rmdir root
+
+	return 0
+}
+
+function warn() {
+	echo -e "${*}"
+	echo -n "Press any key to continue or ^C to abort."
+	read -s -n 1 key
+}
+
+main "${@}"; exit

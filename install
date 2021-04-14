@@ -1,0 +1,248 @@
+#!/bin/bash
+set -e
+
+#######################################
+#	PiHole + OpenVPN + nftables on arch ARMv7
+#	Assumes a wired connection on eth0
+#
+#	Arguments:
+#		None
+#	Returns:
+#		1 upon error
+#		0 otherwise
+#######################################
+function main() {
+	local readonly USAGE="Usage: install"
+
+	if [[ "${#}" -ne 0 ]]; then
+		err "Error: no argument required"
+		err "${USAGE}"
+		return 1
+	fi
+
+	if [ "${EUID}" -ne 0 ]; then
+		err "Please run as root"
+		return 2
+	fi
+
+	if [[ ! -f .env ]]; then
+		err "Could not find .env file"
+		return 3
+	fi
+
+	# Load .env
+	set -o allexport && source .env && set +o allexport
+
+	# Make sure we are ready
+	warn	"Before continuing, please make sure that:\n" \
+		"\t- The server is set up with a static local IP (${SERVER_LAN_IP});\n" \
+		"\t- The variables in .env are correct\n"
+
+	# Change default passwords
+	echo "\nNew password for root:"
+	passwd root
+	echo "New passord for alarm:"
+	passwd alarm
+	useradd -m -G wheel -s /bin/bash "${MY_USER}"
+	echo "New password for ${MY_USER}:"
+	passwd "${MY_USER}"
+
+	# Set hostname
+	echo "${SERVER_HOSTNAME}" > /etc/hostname
+	echo -e "127.0.0.1\t\tlocalhost" > /etc/hosts
+	echo -e "${SERVER_LAN_IP}\t\t${SERVER_HOSTNAME} pi.hole" >> /etc/hosts
+
+	# Get keys, update, install base packages
+	pacman-key --init
+	pacman-key --populate archlinuxarm
+	pacman -Syu
+	pacman -S --needed sudo base-devel git nftables cargo vim
+
+	# Configure sudo
+	warn "Allow members of wheel group to run sudo"
+	visudo
+
+	# Setup services
+	su "${MY_USER}" -c 'install_from_aur paru' && pacman -U "$(ls /home/${MY_USER}/.cache/paru/clone/paru/*.pkg.tar.xz)"
+	install_nftables
+	setup_sshd
+	install_openvpn
+	su "${MY_USER}" -c 'install_from_aur cloudflared' && pacman -U "$(ls /home/${MY_USER}/.cache/paru/clone/cloudflared/*.pkg.tar.xz)"
+	install_pihole
+
+	# Done - Check the following files
+	#/etc/pihole/setupVars.conf
+	#/etc/dnsmasq.d/01-pihole.conf
+
+	return 0
+}
+
+#######################################
+#       Install from AUR              #
+#######################################
+function install_from_aur() {
+	[[ "${#}" -ne 1 ]] && return 1
+
+	mkdir -p ~/.cache/paru/clone/
+	git clone "https://aur.archlinux.org/${1}.git/" "~/.cache/paru/clone/${1}/"
+	cd "~/.cache/paru/clone/${1}/"
+	makepkg -s
+
+	return 0
+}
+
+#######################################
+#       Install nftables              #
+#######################################
+function install_nftables() {
+	# Backup
+	[[ -f /etc/nftables.conf ]] && mv /etc/nftables.conf /etc/nftables.conf.bak
+	
+	# Set new config
+	cp /root/etc/nftables.conf /etc/nftables.conf
+	vim /etc/nftables.conf
+
+	systemctl enable nftables
+
+	return 0
+}
+
+#######################################
+#       Configure sshd                #
+#######################################
+function setup_sshd() {
+	mv /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+	cp /root/etc/ssh/.sshd_config /etc/ssh/sshd_config
+	vim /etc/ssh/sshd_config
+
+	# Add personal pubkey
+	su "${MY_USER}" -c "mkdir -p ~/.ssh && echo '${MY_PUBKEY}' >> ~/.ssh/authorized_keys"
+
+	return 0
+}
+
+#######################################
+#       Install OpenVPN               #
+#######################################
+function install_openvpn() {
+	pacman -S openvpn easy-rsa
+
+	# Define env
+	export EASYRSA=/etc/easy-ras/
+	export EASYRSA_VARS_FILE=/etc/easy-rsa/vars
+
+	# Set up Easy-rsa vars
+	mv "${EASYRSA_VARS_FILE}" "${EASYRSA_VARS_FILE}.bak"
+	echo -e "set_var EASYRSA_ALGO ec\n" \
+		"set_var EASYRSA_CURVE secp521r1\n" \
+		"set_var EASYRSA_DIGEST \"sha512\"\n" \
+		"set_var EASYRSA_NS_SUPPORT \"no\"\n" \
+		> "${EASYRSA_VARS_FILE}"
+	vim "${EASYRSA_VARS_FILE}"
+
+	# Set up CA, keys and crt
+	openvpn --genkey secret /etc/openvpn/server/ta.key
+
+	cd "${EASYRSA}"
+	easyrsa init-pki
+	easyrsa build-ca
+	easyrsa gen-req "${SERVER_HOSTNAME}" nopass
+	easyrsa sign-req server "${SERVER_HOSTNAME}"
+	rm /etc/easy-rsa/pki/reqs/*.req
+	cd /root/
+
+	# Copy keys and cert to /etc/openvpn/
+	cp	/etc/easy-rsa/pki/ca.crt \
+		"/etc/easy-rsa/pki/private/${SERVER_HOSTNAME}.key" \
+		"/etc/easy-rsa/pki/issued/${SERVER_HOSTNAME}.crt" \
+		/etc/openvpn/server/
+	
+	# Fetch openvpn config
+	cp /root/etc/openvpn/server/server.conf "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
+	sed -i "s/myservername/${SERVER_HOSTNAME}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
+	sed -i "s/mylan/${LAN}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
+	sed -i "s/mypiip/${SERVER_LAN_IP}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
+	vim "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
+
+	echo "interface=tun0" > /etc/dnsmasq.d/00-openvpn.conf
+
+	cp /root/etc/openvpn/new_client /etc/openvpn/
+	sed -i "s/my_remote_ip/${SERVER_WAN_IP}/g" /etc/openvpn/new_client
+
+	systemctl enable openvpn
+
+	echo "Done. Please reboot"
+
+	return 0
+}
+
+#######################################
+#       Install Pi-hole               #
+#######################################
+function install_pihole() {
+	pacman -S pi-hole-server php7 php7-cgi php7-fpm php7-sqlite lighttpd
+
+	# Disable systemd-resolved
+	sed -i '/DNSStubListener=yes/s/^#//g' /etc/systemd/resolved.conf
+	sed -i 's/DNSStubListener=yes/DNSStubListener=no/g' /etc/systemd/resolved.conf
+	systemctl disable --now systemd-resolved
+	rm /etc/resolv.conf
+	echo "nameserver 127.0.0.1" > /etc/resolv.conf
+
+	# Cloudflared config
+	mv /etc/cloudflared/cloudflared.yml /etc/cloudflared/cloudflared.yml.bak
+	cp /root/etc/cloudflared/cloudflared.yml /etc/cloudflared/cloudflared.yml
+
+	# Set up Lighthtpd
+	cp /usr/share/pihole/configs/lighttpd.example.conf /etc/lighttpd/lighttpd.conf
+	sed -i 's/\/usr\/bin\/php-cgi/\/usr\/bin\/php-cgi7/g' /etc/lighttpd/lighttpd.conf
+	
+	# Set up php7
+	sed -i '/extension=pdo_sqlite/s/^;//g' /etc/php7/php7.ini
+	sed -i '/extension=sockets/s/^;//g' /etc/php7/php7.ini
+	sed -i '/extension=sqlite3/s/^;//g' /etc/php7/php7.ini
+
+	# Update DNS in /etc/systemd/network/eth0.network
+	warn "Make DNS 127.0.0.1"
+	sed -i "s/1.1.1.1/127.0.0.1/g" /etc/systemd/network/eth0.network
+	sed -i "s/1.0.0.1/127.0.0.1/g" /etc/systemd/network/eth0.network
+	vim /etc/systemd/network/eth0.network
+
+	# Pihole config
+	mv /etc/pihole/setupVars.conf /etc/pihole/setupVars.conf.bak
+	cp /root/etc/pihole/setupVars.conf /etc/pihole/setupVars.conf
+	sed -i "s/SERVER_LAN_IP/${SERVER_LAN_IP}/g" /etc/systemd/network/eth0.network
+	sed -i "s/SERVER_HOSTNAME/${SERVER_HOSTNAME}/g" /etc/systemd/network/eth0.network
+	sed -i "s/LAN_GATEWAY/${LAN_GATEWAY}/g" /etc/systemd/network/eth0.network
+	sed -i "s/IP_START/$(echo ${LAN} | cut -d "." -f -3  | sort -u)/g" /etc/systemd/network/eth0.network
+	vim /etc/pihole/setupVars.config
+
+	# Start server
+	systemctl enable lighttpd
+	systemctl enable --now cloudflared\@cloudflared pihole-FTL
+
+	# Update pihole
+	pihole -g
+
+	return 0
+}
+
+#######################################
+#       Div helpers
+#######################################
+
+function warn() {
+	echo -e "${*}"
+	echo -n "Press any key to continue or ^C to abort."
+	read -s -n 1 key
+}
+
+# Print to stderr (from Google)
+function err() {
+        echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: ${*}" >&2
+}
+
+# Functions to run with su
+export -f install_from_aur
+
+main "${@}"; exit
