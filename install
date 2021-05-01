@@ -72,8 +72,12 @@ function main() {
 	install_pihole
 
 	# Done - Check the following files
-	#/etc/pihole/setupVars.conf
-	#/etc/dnsmasq.d/01-pihole.conf
+
+	warn "Check /etc/pihole/setupVars.conf"
+	vim /etc/pihole/setupVars.conf
+
+	warn "Check /etc/dnsmasq.d/01-pihole.conf"
+	vim /etc/dnsmasq.d/01-pihole.conf
 
 	echo "Done. Please reboot"
 
