@@ -20,6 +20,9 @@ function main() {
 		return 1
 	fi
 
+	# Load .env
+	set -o allexport && source .env && set +o allexport
+
 	SD="${1}"
 	warn "The following device wil be wiped. Continue? ${SD}"
 
@@ -45,10 +48,10 @@ function main() {
 
 	# Set up static ip
 	warn "Please set up a static IP for the PI"
-	nconfig="[Match]\nName=eth0\n\n[Network]\nDHCP=no\nAddress=10.7.0.2/24\nGateway=10.7.0.1\nDNS=1.1.1.1\nDNS=1.0.0.1\nDNSSEC=no\n"
+	nconfig="[Match]\nName=${INTERFACE}\n\n[Network]\nDHCP=no\nAddress=10.7.0.2/24\nGateway=10.7.0.1\nDNS=1.1.1.1\nDNS=1.0.0.1\nDNSSEC=no\n"
 
-	sudo bash -c "echo -e \"${nconfig}\" > root/etc/systemd/network/eth0.network"
-	sudo vim root/etc/systemd/network/eth0.network
+	sudo bash -c "echo -e \"${nconfig}\" > root/etc/systemd/network/${INTERFACE}.network"
+	sudo vim "root/etc/systemd/network/${INTERFACE}.network"
 
 	# Copy config and install script to root's home folder
 	sudo cp -a install .env.example etc/ root/root/

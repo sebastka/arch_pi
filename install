@@ -3,7 +3,7 @@ set -e
 
 #######################################
 #	PiHole + OpenVPN + nftables on arch ARMv7
-#	Assumes a wired connection on eth0
+#	Assumes a wired connection on $INTERFACE
 #
 #	Arguments:
 #		None
@@ -34,12 +34,13 @@ function main() {
 	set -o allexport && source .env && set +o allexport
 
 	# Make sure we are ready
-	warn	"Before continuing, please make sure that:\n" \
+	cat .env
+	warn	"\nBefore continuing, please make sure that:\n" \
 		"\t- The server is set up with a static local IP (${SERVER_LAN_IP});\n" \
 		"\t- The variables in .env are correct\n"
 
 	# Change default passwords
-	echo "\nNew password for root:"
+	echo -e "\nNew password for root:"
 	passwd root
 	echo "New passord for alarm:"
 	passwd alarm
@@ -63,16 +64,18 @@ function main() {
 	visudo
 
 	# Setup services
-	su "${MY_USER}" -c 'install_from_aur paru' && pacman -U "$(ls /home/${MY_USER}/.cache/paru/clone/paru/*.pkg.tar.xz)"
+	install_from_aur paru
 	install_nftables
 	setup_sshd
 	install_openvpn
-	su "${MY_USER}" -c 'install_from_aur cloudflared' && pacman -U "$(ls /home/${MY_USER}/.cache/paru/clone/cloudflared/*.pkg.tar.xz)"
+	pacman -S --needed --asdeps go glibc && install_from_aur cloudflared
 	install_pihole
 
 	# Done - Check the following files
 	#/etc/pihole/setupVars.conf
 	#/etc/dnsmasq.d/01-pihole.conf
+
+	echo "Done. Please reboot"
 
 	return 0
 }
@@ -83,10 +86,11 @@ function main() {
 function install_from_aur() {
 	[[ "${#}" -ne 1 ]] && return 1
 
-	mkdir -p ~/.cache/paru/clone/
-	git clone "https://aur.archlinux.org/${1}.git/" "~/.cache/paru/clone/${1}/"
-	cd "~/.cache/paru/clone/${1}/"
-	makepkg -s
+	su "${MY_USER}" -c "mkdir -p /home/${MY_USER}/.cache/paru/clone/"
+	su "${MY_USER}" -c "git clone \"https://aur.archlinux.org/${1}.git/\" \"/home/${MY_USER}/.cache/paru/clone/${1}/\""
+	su "${MY_USER}" -c "cd \"/home/${MY_USER}/.cache/paru/clone/${1}/\" && makepkg --noconfirm -s"
+
+	pacman --noconfirm -U "$(ls /home/${MY_USER}/.cache/paru/clone/${1}/*.pkg.tar.xz)"
 
 	return 0
 }
@@ -100,6 +104,7 @@ function install_nftables() {
 	
 	# Set new config
 	cp /root/etc/nftables.conf /etc/nftables.conf
+	# sed
 	vim /etc/nftables.conf
 
 	systemctl enable nftables
@@ -112,7 +117,7 @@ function install_nftables() {
 #######################################
 function setup_sshd() {
 	mv /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
-	cp /root/etc/ssh/.sshd_config /etc/ssh/sshd_config
+	cp /root/etc/ssh/sshd_config /etc/ssh/sshd_config
 	vim /etc/ssh/sshd_config
 
 	# Add personal pubkey
@@ -128,16 +133,15 @@ function install_openvpn() {
 	pacman -S openvpn easy-rsa
 
 	# Define env
-	export EASYRSA=/etc/easy-ras/
+	export EASYRSA=/etc/easy-rsa/
 	export EASYRSA_VARS_FILE=/etc/easy-rsa/vars
 
 	# Set up Easy-rsa vars
 	mv "${EASYRSA_VARS_FILE}" "${EASYRSA_VARS_FILE}.bak"
-	echo -e "set_var EASYRSA_ALGO ec\n" \
-		"set_var EASYRSA_CURVE secp521r1\n" \
-		"set_var EASYRSA_DIGEST \"sha512\"\n" \
-		"set_var EASYRSA_NS_SUPPORT \"no\"\n" \
-		> "${EASYRSA_VARS_FILE}"
+	echo "set_var EASYRSA_ALGO ec" > "${EASYRSA_VARS_FILE}"
+	echo "set_var EASYRSA_CURVE secp521r1" >> "${EASYRSA_VARS_FILE}"
+	echo "set_var EASYRSA_DIGEST \"sha512\"" >> "${EASYRSA_VARS_FILE}"
+	echo "set_var EASYRSA_NS_SUPPORT \"no\"" >> "${EASYRSA_VARS_FILE}"
 	vim "${EASYRSA_VARS_FILE}"
 
 	# Set up CA, keys and crt
@@ -148,13 +152,14 @@ function install_openvpn() {
 	easyrsa build-ca
 	easyrsa gen-req "${SERVER_HOSTNAME}" nopass
 	easyrsa sign-req server "${SERVER_HOSTNAME}"
-	rm /etc/easy-rsa/pki/reqs/*.req
+	easyrsa gen-crl
 	cd /root/
 
 	# Copy keys and cert to /etc/openvpn/
 	cp	/etc/easy-rsa/pki/ca.crt \
 		"/etc/easy-rsa/pki/private/${SERVER_HOSTNAME}.key" \
 		"/etc/easy-rsa/pki/issued/${SERVER_HOSTNAME}.crt" \
+		/etc/easy-rsa/pki/crl.pem \
 		/etc/openvpn/server/
 	
 	# Fetch openvpn config
@@ -164,14 +169,15 @@ function install_openvpn() {
 	sed -i "s/mypiip/${SERVER_LAN_IP}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
 	vim "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
 
+	mkdir -p /etc/dnsmasq.d/
 	echo "interface=tun0" > /etc/dnsmasq.d/00-openvpn.conf
 
 	cp /root/etc/openvpn/new_client /etc/openvpn/
 	sed -i "s/my_remote_ip/${SERVER_WAN_IP}/g" /etc/openvpn/new_client
 
-	systemctl enable openvpn
+	sudo chown -R openvpn.network /etc/openvpn/client /etc/openvpn/server
 
-	echo "Done. Please reboot"
+	systemctl enable "openvpn-server@${SERVER_HOSTNAME}"
 
 	return 0
 }
@@ -180,49 +186,49 @@ function install_openvpn() {
 #       Install Pihole               #
 #######################################
 function install_pihole() {
-	pacman -S pi-hole-server php7 php7-cgi php7-fpm php7-sqlite lighttpd
+	pacman -S --needed --asdeps php7 php7-cgi php7-fpm php7-sqlite lighttpd \
+		bc logrotate bind-tools lsof cmake libidn
+	install_from_aur pi-hole-ftl
+	install_from_aur pi-hole-server
 
 	# Disable systemd-resolved
-	sed -i '/DNSStubListener=yes/s/^#//g' /etc/systemd/resolved.conf
-	sed -i 's/DNSStubListener=yes/DNSStubListener=no/g' /etc/systemd/resolved.conf
+	#sed -i '/DNSStubListener=yes/s/^#//g' /etc/systemd/resolved.conf
+	#sed -i 's/DNSStubListener=yes/DNSStubListener=no/g' /etc/systemd/resolved.conf
 	systemctl disable --now systemd-resolved
 	rm /etc/resolv.conf
 	echo "nameserver 127.0.0.1" > /etc/resolv.conf
 
 	# Cloudflared config
-	mv /etc/cloudflared/cloudflared.yml /etc/cloudflared/cloudflared.yml.bak
-	cp /root/etc/cloudflared/cloudflared.yml /etc/cloudflared/cloudflared.yml
+	[[ -f /etc/cloudflared/config.yml ]] && mv /etc/cloudflared/config.yml /etc/cloudflared/config.yml.bak
+	cp /root/etc/cloudflared/config.yml /etc/cloudflared/config.yml
 
 	# Set up Lighthtpd
 	cp /usr/share/pihole/configs/lighttpd.example.conf /etc/lighttpd/lighttpd.conf
 	sed -i 's/\/usr\/bin\/php-cgi/\/usr\/bin\/php-cgi7/g' /etc/lighttpd/lighttpd.conf
 	
 	# Set up php7
-	sed -i '/extension=pdo_sqlite/s/^;//g' /etc/php7/php7.ini
-	sed -i '/extension=sockets/s/^;//g' /etc/php7/php7.ini
-	sed -i '/extension=sqlite3/s/^;//g' /etc/php7/php7.ini
+	sed -i '/extension=pdo_sqlite/s/^;//g' /etc/php7/php.ini
+	sed -i '/extension=sockets/s/^;//g' /etc/php7/php.ini
+	sed -i '/extension=sqlite3/s/^;//g' /etc/php7/php.ini
 
-	# Update DNS in /etc/systemd/network/eth0.network
+	# Update DNS in /etc/systemd/network/INTERFACE.network
 	warn "Make DNS 127.0.0.1"
-	sed -i "s/1.1.1.1/127.0.0.1/g" /etc/systemd/network/eth0.network
-	sed -i "s/1.0.0.1/127.0.0.1/g" /etc/systemd/network/eth0.network
-	vim /etc/systemd/network/eth0.network
+	sed -i "s/1.1.1.1/${SERVER_LAN_IP}/g" "/etc/systemd/network/${INTERFACE}.network"
+	sed -i "s/1.0.0.1/${SERVER_LAN_IP}/g" "/etc/systemd/network/${INTERFACE}.network"
+	vim "/etc/systemd/network/${INTERFACE}.network"
 
 	# Pihole config
 	mv /etc/pihole/setupVars.conf /etc/pihole/setupVars.conf.bak
 	cp /root/etc/pihole/setupVars.conf /etc/pihole/setupVars.conf
-	sed -i "s/SERVER_LAN_IP/${SERVER_LAN_IP}/g" /etc/systemd/network/eth0.network
-	sed -i "s/SERVER_HOSTNAME/${SERVER_HOSTNAME}/g" /etc/systemd/network/eth0.network
-	sed -i "s/LAN_GATEWAY/${LAN_GATEWAY}/g" /etc/systemd/network/eth0.network
-	sed -i "s/IP_START/$(echo ${LAN} | cut -d "." -f -3  | sort -u)/g" /etc/systemd/network/eth0.network
-	vim /etc/pihole/setupVars.config
+	sed -i "s/SERVER_LAN_IP/${SERVER_LAN_IP}/g" /etc/pihole/setupVars.conf
+	sed -i "s/SERVER_HOSTNAME/${SERVER_HOSTNAME}/g" /etc/pihole/setupVars.conf
+	sed -i "s/LAN_GATEWAY/${LAN_GATEWAY}/g" /etc/pihole/setupVars.conf
+	sed -i "s/IP_START/$(echo ${LAN} | cut -d "." -f -3  | sort -u)/g" /etc/pihole/setupVars.conf
+	vim /etc/pihole/setupVars.conf
 
 	# Start server
 	systemctl enable lighttpd
-	systemctl enable --now cloudflared\@cloudflared pihole-FTL
-
-	# Update pihole
-	pihole -g
+	systemctl enable cloudflared pihole-FTL
 
 	return 0
 }
