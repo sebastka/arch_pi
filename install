@@ -125,7 +125,7 @@ function setup_sshd() {
 	vim /etc/ssh/sshd_config
 
 	# Add personal pubkey
-	su "${MY_USER}" -c "mkdir -p ~/.ssh && echo '${MY_PUBKEY}' >> ~/.ssh/authorized_keys"
+	su "${MY_USER}" -c "mkdir -p ~/.ssh && echo -e \"${MY_PUBKEY}\" >> ~/.ssh/authorized_keys"
 
 	return 0
 }
