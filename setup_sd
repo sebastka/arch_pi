@@ -36,13 +36,15 @@ function main() {
 	sudo mkdir -p root/boot && sudo mount "${SD}p1" root/boot/
 
 	# Get img and copy to sd
-	[[ ! -f "ArchLinuxARM-rpi-4-latest.tar.gz" ]] && wget "http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-4-latest.tar.gz"
-	sudo bsdtar -xpf "ArchLinuxARM-rpi-4-latest.tar.gz" -C root
+	[[ ! -f ArchLinuxARM-rpi-4-latest.tar.gz ]] && wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-4-latest.tar.gz
+	sudo bsdtar -xpf ArchLinuxARM-rpi-4-latest.tar.gz -C root
+	rm ArchLinuxARM-rpi-4-latest.tar.gz
 
 	# aarch64
-	#[[ ! -f "ArchLinuxARM-rpi-aarch64-latest.tar.gz" ]] && wget "http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz"
-	#sudo bsdtar -xpf "ArchLinuxARM-rpi-aarch64-latest.tar.gz" -C root
+	#[[ ! -f ArchLinuxARM-rpi-aarch64-latest.tar.gz ]] && wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz
+	#sudo bsdtar -xpf ArchLinuxARM-rpi-aarch64-latest.tar.gz -C root
 	#sed -i 's/mmcblk0/mmcblk1/g' root/etc/fstab
+	#rm ArchLinuxARM-rpi-aarch64-latest.tar.gz
 
 	sudo sync
 
@@ -65,6 +67,8 @@ function main() {
 
 	sudo umount root/boot/ root/
 	rmdir root
+
+	echo -e "\nDone\n"
 
 	return 0
 }
