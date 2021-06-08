@@ -54,6 +54,10 @@ function main() {
 	echo -e "127.0.0.1\t\tlocalhost" > /etc/hosts
 	echo -e "${SERVER_LAN_IP}\t\t${SERVER_HOSTNAME}" >> /etc/hosts
 
+	# Set locale
+	sed -i "s/#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/g" /etc/locale.gen
+	locale-gen
+
 	# Get keys, update, install base packages
 	pacman-key --init
 	pacman-key --populate archlinuxarm
