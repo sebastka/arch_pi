@@ -17,7 +17,7 @@ function main() {
 	local readonly USAGE="Usage: new_client name"
 
 	if [[ "${#}" -ne 1 ]]; then
-		err "Error: one argument required"
+		err "Error: one argument required, ${#} received"
 		err "${USAGE}"
 		return 1
 	fi
@@ -27,26 +27,28 @@ function main() {
 		return 2
 	fi
 
+	local readonly client="${1}"
+
 	# Set env
 	[[ -z "${EASYRSA}" ]] && export EASYRSA=/etc/easy-rsa
 	[[ -z "${EASYRSA_VARS_FILE}" ]] && export EASYRSA_VARS_FILE=/etc/easy-rsa/vars
 	
 	# Create client keys
-	easyrsa gen-req "${1}" nopass
-	easyrsa sign-req client "${1}"
+	easyrsa gen-req "${client}" nopass
+	easyrsa sign-req client "${client}"
 
 	# Move to /etc/openvpn
-	cp "/etc/easy-rsa/pki/private/${1}.key" /etc/openvpn/client/
-	cp "/etc/easy-rsa/pki/issued/${1}.crt" /etc/openvpn/client/
-	rm "/etc/easy-rsa/pki/reqs/${1}.req"
+	cp "/etc/easy-rsa/pki/private/${client}.key" /etc/openvpn/client/
+	cp "/etc/easy-rsa/pki/issued/${client}.crt" /etc/openvpn/client/
+	rm "/etc/easy-rsa/pki/reqs/${client}.req"
 
 
-cat <<EOF >>/etc/openvpn/client/$1@$HOSTNAME.ovpn
+cat <<EOF >>/etc/openvpn/client/$client@$HOSTNAME.ovpn
 # OpenVPN client config
 
 client
 dev tun
-remote my_remote_ip 1194 udp
+remote REMOTE_IP 1194 udp
 resolv-retry infinite
 nobind
 persist-key
@@ -72,14 +74,14 @@ remote-cert-tls server
 $(cat /etc/openvpn/server/ca.crt)
 </ca>
 
-# $1.crt
+# $client.crt
 <cert>
-$(cat /etc/openvpn/client/$1.crt)
+$(cat /etc/openvpn/client/$client.crt)
 </cert>
 
-# $1.key
+# $client.key
 <key>
-$(cat /etc/openvpn/client/$1.key)
+$(cat /etc/openvpn/client/$client.key)
 </key>
 
 # ta.key

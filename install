@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+#set -x
 
 #######################################
 #	PiHole + OpenVPN + nftables on arch ARMv7
@@ -51,33 +52,32 @@ function main() {
 	# Set hostname
 	echo "${SERVER_HOSTNAME}" > /etc/hostname
 	echo -e "127.0.0.1\t\tlocalhost" > /etc/hosts
-	echo -e "${SERVER_LAN_IP}\t\t${SERVER_HOSTNAME} pi.hole" >> /etc/hosts
+	echo -e "${SERVER_LAN_IP}\t\t${SERVER_HOSTNAME}" >> /etc/hosts
 
 	# Get keys, update, install base packages
 	pacman-key --init
 	pacman-key --populate archlinuxarm
 	pacman -Syu
-	pacman -S --needed sudo base-devel git nftables cargo vim
+	pacman -S --needed sudo base-devel git nftables vim
 
 	# Configure sudo
 	warn "Allow members of wheel group to run sudo"
 	visudo
 
+	warn "Set MAKEFLAGS=\"-j4\""
+	vim /etc/makepkg.conf
+
 	# Setup services
-	install_from_aur paru
+	#pacman -S --needed cargo && install_from_aur paru
 	install_nftables
 	setup_sshd
-	install_openvpn
-	pacman -S --needed --asdeps go glibc && install_from_aur cloudflared
-	install_pihole
+	setup_openvpn
+	pacman -S --needed --asdeps go glibc && install_from_aur cloudflared && systemctl enable cloudflared
 
-	# Done - Check the following files
-
-	warn "Check /etc/pihole/setupVars.conf"
-	vim /etc/pihole/setupVars.conf
-
-	warn "Check /etc/dnsmasq.d/01-pihole.conf"
-	vim /etc/dnsmasq.d/01-pihole.conf
+	# Pihole (requires cloudflared with current config)
+	pacman -S docker docker-compose
+	systemctl enable docker # Fails to start before reboot
+	docker_install_pihole
 
 	echo "Done. Please reboot"
 
@@ -91,6 +91,7 @@ function install_from_aur() {
 	[[ "${#}" -ne 1 ]] && return 1
 
 	su "${MY_USER}" -c "mkdir -p /home/${MY_USER}/.cache/paru/clone/"
+	[[ -d "/home/${MY_USER}/.cache/paru/clone/${1}" ]] && rm -rf "/home/${MY_USER}/.cache/paru/clone/${1}"
 	su "${MY_USER}" -c "git clone \"https://aur.archlinux.org/${1}.git/\" \"/home/${MY_USER}/.cache/paru/clone/${1}/\""
 	su "${MY_USER}" -c "cd \"/home/${MY_USER}/.cache/paru/clone/${1}/\" && makepkg --noconfirm -s"
 
@@ -108,7 +109,8 @@ function install_nftables() {
 	
 	# Set new config
 	cp /root/etc/nftables.conf /etc/nftables.conf
-	# sed
+	sed -i "s/MY_LAN/${LAN}/g" /etc/nftables.conf
+	sed -i "s/MY_VPN_SUBNET/${VPN_SUBNET}/g" /etc/nftables.conf
 	vim /etc/nftables.conf
 
 	systemctl enable nftables
@@ -133,7 +135,7 @@ function setup_sshd() {
 #######################################
 #       Install OpenVPN               #
 #######################################
-function install_openvpn() {
+function setup_openvpn() {
 	pacman -S openvpn easy-rsa
 
 	# Define env
@@ -168,16 +170,17 @@ function install_openvpn() {
 	
 	# Fetch openvpn config
 	cp /root/etc/openvpn/server/server.conf "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
-	sed -i "s/myservername/${SERVER_HOSTNAME}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
-	sed -i "s/mylan/${LAN}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
-	sed -i "s/mypiip/${SERVER_LAN_IP}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
+	sed -i "s/SERVER_HOSTNAME/${SERVER_HOSTNAME}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
+	sed -i "s/MY_LAN/${LAN}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
+	sed -i "s/SERVER_LAN_IP/${SERVER_LAN_IP}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
+	sed -i "s/VPN_SUBNET/${VPN_SUBNET}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
 	vim "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
 
 	mkdir -p /etc/dnsmasq.d/
 	echo "interface=tun0" > /etc/dnsmasq.d/00-openvpn.conf
 
 	cp /root/etc/openvpn/new_client /etc/openvpn/
-	sed -i "s/my_remote_ip/${SERVER_WAN_IP}/g" /etc/openvpn/new_client
+	sed -i "s/REMOTE_IP/${SERVER_WAN_IP}/g" /etc/openvpn/new_client
 
 	sudo chown -R openvpn.network /etc/openvpn/client /etc/openvpn/server
 
@@ -186,18 +189,7 @@ function install_openvpn() {
 	return 0
 }
 
-#######################################
-#       Install Pihole               #
-#######################################
-function install_pihole() {
-	pacman -S --needed --asdeps php7 php7-cgi php7-fpm php7-sqlite lighttpd \
-		bc logrotate bind-tools lsof cmake libidn
-	install_from_aur pi-hole-ftl
-	install_from_aur pi-hole-server
-
-	# Disable systemd-resolved
-	#sed -i '/DNSStubListener=yes/s/^#//g' /etc/systemd/resolved.conf
-	#sed -i 's/DNSStubListener=yes/DNSStubListener=no/g' /etc/systemd/resolved.conf
+function docker_install_pihole() {
 	systemctl disable --now systemd-resolved
 	rm /etc/resolv.conf
 	echo "nameserver 127.0.0.1" > /etc/resolv.conf
@@ -206,33 +198,30 @@ function install_pihole() {
 	[[ -f /etc/cloudflared/config.yml ]] && mv /etc/cloudflared/config.yml /etc/cloudflared/config.yml.bak
 	cp /root/etc/cloudflared/config.yml /etc/cloudflared/config.yml
 
-	# Set up Lighthtpd
-	cp /usr/share/pihole/configs/lighttpd.example.conf /etc/lighttpd/lighttpd.conf
-	sed -i 's/\/usr\/bin\/php-cgi/\/usr\/bin\/php-cgi7/g' /etc/lighttpd/lighttpd.conf
-	
-	# Set up php7
-	sed -i '/extension=pdo_sqlite/s/^;//g' /etc/php7/php.ini
-	sed -i '/extension=sockets/s/^;//g' /etc/php7/php.ini
-	sed -i '/extension=sqlite3/s/^;//g' /etc/php7/php.ini
-
 	# Update DNS in /etc/systemd/network/INTERFACE.network
 	warn "Make DNS 127.0.0.1"
 	sed -i "s/1.1.1.1/${SERVER_LAN_IP}/g" "/etc/systemd/network/${INTERFACE}.network"
 	sed -i "s/1.0.0.1/${SERVER_LAN_IP}/g" "/etc/systemd/network/${INTERFACE}.network"
 	vim "/etc/systemd/network/${INTERFACE}.network"
 
-	# Pihole config
-	mv /etc/pihole/setupVars.conf /etc/pihole/setupVars.conf.bak
-	cp /root/etc/pihole/setupVars.conf /etc/pihole/setupVars.conf
-	sed -i "s/SERVER_LAN_IP/${SERVER_LAN_IP}/g" /etc/pihole/setupVars.conf
-	sed -i "s/SERVER_HOSTNAME/${SERVER_HOSTNAME}/g" /etc/pihole/setupVars.conf
-	sed -i "s/LAN_GATEWAY/${LAN_GATEWAY}/g" /etc/pihole/setupVars.conf
-	sed -i "s/IP_START/$(echo ${LAN} | cut -d "." -f -3  | sort -u)/g" /etc/pihole/setupVars.conf
-	vim /etc/pihole/setupVars.conf
+	# Configure docker-compose & set up container
+	su "${MY_USER}" -c "mkdir -p /home/${MY_USER}/pihole"
+	cp /root/docker-compose.yml "/home/${MY_USER}/pihole/docker-compose.yml"
+	chown sebastian:sebastian "/home/${MY_USER}/pihole/docker-compose.yml"
+	sed -i "s/MY_EMAIL/${MY_EMAIL}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
+	sed -i "s/PIHOLE_ADMIN_PW/${PIHOLE_ADMIN_PW}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
+	sed -i "s/SERVER_LAN_IP/${SERVER_LAN_IP}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
+	sed -i "s/SERVER_HOSTNAME/${SERVER_HOSTNAME}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
+	sed -i "s/DHCP_START/${DHCP_START}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
+	sed -i "s/DHCP_END/${DHCP_END}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
+	sed -i "s/LAN_GATEWAY/${LAN_GATEWAY}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
+	sed -i "s/DHCP_DOMAIN/${DHCP_DOMAIN}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
+	vim "/home/${MY_USER}/pihole/docker-compose.yml"
 
-	# Start server
-	systemctl enable lighttpd
-	systemctl enable cloudflared pihole-FTL
+	# Update hosts
+	echo -e "${SERVER_LAN_IP}\t\tpi.hole" >> /etc/hosts
+
+	warn "Run \`sudo docker-compose up --detach\` in /home/${MY_USER}/pihole after reboot"
 
 	return 0
 }

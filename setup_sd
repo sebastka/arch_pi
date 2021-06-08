@@ -20,10 +20,17 @@ function main() {
 		return 1
 	fi
 
+	if [[ ! -f .env ]]; then
+		err "Please configure .env"
+		return 2
+	fi
+
 	# Load .env
 	set -o allexport && source .env && set +o allexport
-
 	SD="${1}"
+
+	# Checking if $SD exists and ask for confirmation
+	[[ ! -e "${SD}" ]] && echo "The device ${SD} does not exist. Aborting." && return 1
 	warn "The following device wil be wiped. Continue? ${SD}"
 
 	# Prepare partitions
@@ -36,7 +43,8 @@ function main() {
 	sudo mkdir -p root/boot && sudo mount "${SD}p1" root/boot/
 
 	# Get img and copy to sd
-	[[ ! -f ArchLinuxARM-rpi-4-latest.tar.gz ]] && wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-4-latest.tar.gz
+	[[ -f ArchLinuxARM-rpi-4-latest.tar.gz ]] && rm ArchLinuxARM-rpi-4-latest.tar.gz
+	wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-4-latest.tar.gz
 	sudo bsdtar -xpf ArchLinuxARM-rpi-4-latest.tar.gz -C root
 	rm ArchLinuxARM-rpi-4-latest.tar.gz
 
@@ -50,20 +58,14 @@ function main() {
 
 	# Set up static ip
 	warn "Please set up a static IP for the PI"
-	nconfig="[Match]\nName=${INTERFACE}\n\n[Network]\nDHCP=no\nAddress=10.7.0.2/24\nGateway=10.7.0.1\nDNS=1.1.1.1\nDNS=1.0.0.1\nDNSSEC=no\n"
+	nconfig="[Match]\nName=${INTERFACE}\n\n[Network]\nDHCP=no\nAddress=${SERVER_LAN_IP}/24\nGateway=${LAN_GATEWAY}\nDNS=1.1.1.1\nDNS=1.0.0.1\nDNSSEC=no\n"
 
 	sudo bash -c "echo -e \"${nconfig}\" > root/etc/systemd/network/${INTERFACE}.network"
 	sudo vim "root/etc/systemd/network/${INTERFACE}.network"
 
 	# Copy config and install script to root's home folder
-	sudo cp -a install .env.example etc/ root/root/
-	sudo chown -R root:root root/root/install root/root/.env.example root/root/etc/
-
-	# Also copy .env if it's already been configured
-	if [[ -f .env ]]; then
-		sudo cp .env root/root/
-		sudo chown -R root:root root/root/.env
-	fi
+	sudo cp -a install .env .env.example docker-compose.yml etc/ root/root/
+	sudo chown -R root:root root/root/install root/root/.env root/root/.env.example root/root/docker-compose.yml root/root/etc/
 
 	sudo umount root/boot/ root/
 	rmdir root
