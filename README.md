@@ -16,12 +16,19 @@ $ setup_sd /dev/mmcblk0
 
 ## Install server
 
+SSH to the Pi and:
 ```console
 # ./install
 # reboot
 ```
 
-Set DNS to 127.0.0.1 after reboot:
+After reboot:
+```console
+$ cd /home/user/pihole
+$ sudo docker-compose up --detach
+```
+
+Set DNS to 127.0.0.1:
 ```console
 # echo "nameserver 127.0.0.1" > /etc/resolv.conf
 # vim /etc/systemd/network/eth0.network
