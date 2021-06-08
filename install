@@ -183,10 +183,8 @@ function setup_openvpn() {
 	mkdir -p /etc/dnsmasq.d/
 	echo "interface=tun0" > /etc/dnsmasq.d/00-openvpn.conf
 
-	cp /root/etc/openvpn/new_client /etc/openvpn/
-	sed -i "s/REMOTE_IP/${SERVER_WAN_IP}/g" /etc/openvpn/new_client
-
-	sudo chown -R openvpn.network /etc/openvpn/client /etc/openvpn/server
+	mkdir -p /etc/openvpn/revoked/
+	chown -R openvpn:network /etc/openvpn/server/ /etc/openvpn/client/ /etc/openvpn/revoked/
 
 	systemctl enable "openvpn-server@${SERVER_HOSTNAME}"
 
