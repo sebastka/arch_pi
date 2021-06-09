@@ -52,7 +52,8 @@ function main() {
 	# Set hostname
 	echo "${SERVER_HOSTNAME}" > /etc/hostname
 	echo -e "127.0.0.1\t\tlocalhost" > /etc/hosts
-	echo -e "${SERVER_LAN_IP}\t\t${SERVER_HOSTNAME}" >> /etc/hosts
+	echo -e "127.0.1.1\t\t${SERVER_HOSTNAME}.${LAN_DHCP_DOMAIN}\t${SERVER_HOSTNAME}" >> /etc/hosts
+	echo -e "${SERVER_LAN_IP}\t\t${SERVER_HOSTNAME}.${LAN_DHCP_DOMAIN}\t${SERVER_HOSTNAME}" >> /etc/hosts
 
 	# Set locale
 	sed -i "s/#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/g" /etc/locale.gen
@@ -73,12 +74,12 @@ function main() {
 
 	# Setup services
 	#pacman -S --needed cargo && install_from_aur paru
-	install_nftables
+	setup_nftables
 	setup_sshd
 	setup_openvpn
-	pacman -S --needed --asdeps go glibc && install_from_aur cloudflared && systemctl enable cloudflared
+	setup_unbound
 
-	# Pihole (requires cloudflared with current config)
+	# Pihole (using unbound)
 	pacman -S docker docker-compose
 	systemctl enable docker # Fails to start before reboot
 	docker_install_pihole
@@ -105,9 +106,9 @@ function install_from_aur() {
 }
 
 #######################################
-#       Install nftables              #
+#        Setup nftables               #
 #######################################
-function install_nftables() {
+function setup_nftables() {
 	# Backup
 	[[ -f /etc/nftables.conf ]] && mv /etc/nftables.conf /etc/nftables.conf.bak
 	
@@ -123,7 +124,7 @@ function install_nftables() {
 }
 
 #######################################
-#       Configure sshd                #
+#         Setup sshd                  #
 #######################################
 function setup_sshd() {
 	mv /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
@@ -137,7 +138,7 @@ function setup_sshd() {
 }
 
 #######################################
-#       Install OpenVPN               #
+#        Setup OpenVPN                #
 #######################################
 function setup_openvpn() {
 	pacman -S openvpn easy-rsa
@@ -191,14 +192,30 @@ function setup_openvpn() {
 	return 0
 }
 
+#######################################
+#        Setup Unbound                #
+#######################################
+function setup_unbound() {
+	pacman -S --needed unbound expat
+
+	# Backup old config and fetch ours
+	[[ -f /etc/unbound/unbound.conf ]] && mv /etc/unbound/unbound.conf /etc/unbound/unbound.conf.bak
+	cp /root/etc/unbound/unbound.conf /etc/unbound/unbound.conf
+
+	# Fetch and auto-update root.hints
+	cp /root/etc/systemd/system/roothints.service /etc/systemd/system/
+	cp /root/etc/systemd/system/roothints.timer /etc/systemd/system/
+
+	systemctl enable --now roothints.timer unbound
+}
+
+#######################################
+#        Setup PiHole                 #
+#######################################
 function docker_install_pihole() {
 	systemctl disable --now systemd-resolved
 	rm /etc/resolv.conf
 	echo "nameserver 1.1.1.1" > /etc/resolv.conf
-
-	# Cloudflared config
-	[[ -f /etc/cloudflared/config.yml ]] && mv /etc/cloudflared/config.yml /etc/cloudflared/config.yml.bak
-	cp /root/etc/cloudflared/config.yml /etc/cloudflared/config.yml
 
 	# Configure docker-compose.yml & set up container
 	su "${MY_USER}" -c "mkdir -p /home/${MY_USER}/pihole"
@@ -214,18 +231,15 @@ function docker_install_pihole() {
 	sed -i "s/LAN_DHCP_DOMAIN/${LAN_DHCP_DOMAIN}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
 	vim "/home/${MY_USER}/pihole/docker-compose.yml"
 
-	# Update hosts
-	echo -e "${SERVER_LAN_IP}\t\tpi.hole" >> /etc/hosts
-
 	warn	"\nAfter reboot:\n" \
-		"\t- Run \`sudo docker-compose up --detach\` in /home/${MY_USER}/pihole\n" \
-		"\t- Update the DNS to 127.0.0.1 in both /etc/systemd/network/${INTERFACE}.network and /etc/resolv.conf\n"
+		"\t1. Run \`sudo docker-compose up --detach\` in /home/${MY_USER}/pihole\n" \
+		"\t2. Update the DNS to 127.0.0.1 in both /etc/systemd/network/${INTERFACE}.network and /etc/resolv.conf\n"
 
 	return 0
 }
 
 #######################################
-#       Div helpers
+#       Div helpers                   #
 #######################################
 
 function warn() {
