@@ -219,8 +219,8 @@ function docker_install_pihole() {
 
 	# Configure docker-compose.yml & set up container
 	su "${MY_USER}" -c "mkdir -p /home/${MY_USER}/pihole"
-	cp /root/docker-compose.yml "/home/${MY_USER}/pihole/docker-compose.yml"
-	chown sebastian:sebastian "/home/${MY_USER}/pihole/docker-compose.yml"
+	cp /root/docker-compose.yml /root/update "/home/${MY_USER}/pihole/"
+	chown -R sebastian:sebastian "/home/${MY_USER}/pihole/"
 	sed -i "s/MY_EMAIL/${MY_EMAIL}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
 	sed -i "s/PIHOLE_ADMIN_PW/${PIHOLE_ADMIN_PW}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
 	sed -i "s/SERVER_LAN_IP/${SERVER_LAN_IP}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
@@ -231,9 +231,12 @@ function docker_install_pihole() {
 	sed -i "s/LAN_DHCP_DOMAIN/${LAN_DHCP_DOMAIN}/g" "/home/${MY_USER}/pihole/docker-compose.yml"
 	vim "/home/${MY_USER}/pihole/docker-compose.yml"
 
-	warn	"\nAfter reboot:\n" \
-		"\t1. Run \`sudo docker-compose up --detach\` in /home/${MY_USER}/pihole\n" \
-		"\t2. Update the DNS to 127.0.0.1 in both /etc/systemd/network/${INTERFACE}.network and /etc/resolv.conf\n"
+	warn "Set DNS to 127.0.0.1"
+	sed -i "s/DNS=1.1.1.1/DNS=127.0.0.1/g" "/etc/systemd/network/${INTERFACE}.network"
+	sed -i "s/DNS=1.0.0.1//g" "/etc/systemd/network/${INTERFACE}.network"
+	vim "/etc/systemd/network/${INTERFACE}.network"
+
+	warn "\nAfter reboot, run ~/pihole/update to get the pihole container started."
 
 	return 0
 }

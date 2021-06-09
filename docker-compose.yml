@@ -6,6 +6,8 @@ services:
       container_name: pihole
       image: pihole/pihole:latest
       network_mode: host
+      dns:
+	- 127.0.0.1
       environment:
         ADMIN_EMAIL: "MY_EMAIL" # Set an administrative contact address for the Block Page
         TZ: 'Europe/Oslo' # Set your timezone to make sure logs rotate at local midnight instead of at UTC midnight.
