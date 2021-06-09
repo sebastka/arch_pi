@@ -4,7 +4,7 @@ set -e
 
 #######################################
 #	PiHole + OpenVPN + nftables on arch ARMv7
-#	Assumes a wired connection on $INTERFACE
+#	Assumes a wired connection on $MY_INTERFACE
 #
 #	Arguments:
 #		None
@@ -78,15 +78,12 @@ function main() {
 	setup_sshd
 	setup_openvpn
 	setup_unbound
+	setup_docker
 
-	# Docker containers
-	pacman -S docker docker-compose
-	systemctl enable docker # Fails to start before reboot
-	cp -a /root/docker/ "/home/${MY_USER}/"
-	chown -R "${MY_USER}":"${MY_USER}" "/home/${MY_USER}/docker/"
-
-	docker_setup_pihole
-	docker_setup_ddns
+	warn "Set DNS to 127.0.0.1"
+	sed -i "s/DNS=1.1.1.1/DNS=127.0.0.1/g" "/etc/systemd/network/${MY_INTERFACE}.network"
+	sed -i "s/DNS=1.0.0.1//g" "/etc/systemd/network/${MY_INTERFACE}.network"
+	vim "/etc/systemd/network/${MY_INTERFACE}.network"
 
 	echo "Done. Please reboot"
 
@@ -118,7 +115,7 @@ function setup_nftables() {
 	
 	# Set new config
 	cp /root/etc/nftables.conf /etc/nftables.conf
-	sed -i "s/MY_LAN/${LAN}/g" /etc/nftables.conf
+	sed -i "s/MY_LAN/${MY_LAN}/g" /etc/nftables.conf
 	sed -i "s/MY_VPN_SUBNET/${VPN_SUBNET}/g" /etc/nftables.conf
 	vim /etc/nftables.conf
 
@@ -180,7 +177,7 @@ function setup_openvpn() {
 	# Fetch openvpn config
 	cp /root/etc/openvpn/server/server.conf "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
 	sed -i "s/SERVER_HOSTNAME/${SERVER_HOSTNAME}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
-	sed -i "s/MY_LAN/${LAN}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
+	sed -i "s/MY_LAN/${MY_LAN}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
 	sed -i "s/SERVER_LAN_IP/${SERVER_LAN_IP}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
 	sed -i "s/VPN_SUBNET/${VPN_SUBNET}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
 	vim "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
@@ -205,54 +202,49 @@ function setup_unbound() {
 	# Backup old config and fetch ours
 	[[ -f /etc/unbound/unbound.conf ]] && mv /etc/unbound/unbound.conf /etc/unbound/unbound.conf.bak
 	cp /root/etc/unbound/unbound.conf /etc/unbound/unbound.conf
+	vim /etc/unbound/unbound.conf
 
 	# Fetch and auto-update root.hints
 	cp /root/etc/systemd/system/roothints.service /etc/systemd/system/
 	cp /root/etc/systemd/system/roothints.timer /etc/systemd/system/
-
 	systemctl enable --now roothints.timer unbound
-}
-
-#######################################
-#        Setup PiHole                 #
-#######################################
-function docker_setup_pihole() {
-	systemctl disable --now systemd-resolved
-	rm /etc/resolv.conf
-	echo "nameserver 1.1.1.1" > /etc/resolv.conf
-
-	# Update variables in docker-compose.yml
-	sed -i "s/MY_EMAIL/${MY_EMAIL}/g" "/home/${MY_USER}/docker/pihole/docker-compose.yml"
-	sed -i "s/PIHOLE_ADMIN_PW/${PIHOLE_ADMIN_PW}/g" "/home/${MY_USER}/docker/pihole/docker-compose.yml"
-	sed -i "s/SERVER_LAN_IP/${SERVER_LAN_IP}/g" "/home/${MY_USER}/docker/pihole/docker-compose.yml"
-	sed -i "s/SERVER_HOSTNAME/${SERVER_HOSTNAME}/g" "/home/${MY_USER}/docker/pihole/docker-compose.yml"
-	sed -i "s/LAN_DHCP_START/${LAN_DHCP_START}/g" "/home/${MY_USER}/docker/pihole/docker-compose.yml"
-	sed -i "s/LAN_DHCP_END/${LAN_DHCP_END}/g" "/home/${MY_USER}/docker/pihole/docker-compose.yml"
-	sed -i "s/LAN_GATEWAY/${LAN_GATEWAY}/g" "/home/${MY_USER}/docker/pihole/docker-compose.yml"
-	sed -i "s/LAN_DHCP_DOMAIN/${LAN_DHCP_DOMAIN}/g" "/home/${MY_USER}/docker/pihole/docker-compose.yml"
-	vim "/home/${MY_USER}/docker/pihole/docker-compose.yml"
-
-	warn "Set DNS to 127.0.0.1"
-	sed -i "s/DNS=1.1.1.1/DNS=127.0.0.1/g" "/etc/systemd/network/${INTERFACE}.network"
-	sed -i "s/DNS=1.0.0.1//g" "/etc/systemd/network/${INTERFACE}.network"
-	vim "/etc/systemd/network/${INTERFACE}.network"
-
-	warn "\nAfter reboot, run '~/docker/update pihole' to get the pihole container started."
 
 	return 0
 }
 
 #######################################
-#          Setup ddns                 #
+#        Setup Docker                 #
 #######################################
-function docker_setup_ddns() {
-	# Update variables in docker-compose.yml
-	sed -i "s/MY_API_KEY/${MY_API_KEY}/g" "/home/${MY_USER}/docker/cloudflare-ddns/docker-compose.yml"
-	sed -i "s/LAN_DHCP_DOMAIN/${LAN_DHCP_DOMAIN}/g" "/home/${MY_USER}/docker/cloudflare-ddns/docker-compose.yml"
-	sed -i "s/DDNS_SUBDOMAIN/${DDNS_SUBDOMAIN}/g" "/home/${MY_USER}/docker/cloudflare-ddns/docker-compose.yml"
-	vim "/home/${MY_USER}/docker/cloudflare-ddns/docker-compose.yml"
+function setup_docker() {
+	pacman -S docker docker-compose
+	systemctl enable docker # Fails to start before reboot
+	cp -a /root/docker/ "/home/${MY_USER}/"
+	chown -R "${MY_USER}":"${MY_USER}" "/home/${MY_USER}/docker/"
 
-	warn "\nAfter reboot, run '~/docker/update cloudflare-ddns' to get the pihole container started."
+	# Update variables in each docker-compose.yml
+	cd "/home/${MY_USER}/docker/"
+	for d in $(ls -d */); do
+		sed -i "s/MY_INTERFACE/${MY_INTERFACE}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/MY_LAN/${MY_LAN}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/LAN_GATEWAY/${LAN_GATEWAY}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/LAN_DHCP_START/${LAN_DHCP_START}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/LAN_DHCP_END/${LAN_DHCP_END}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/LAN_DHCP_DOMAIN/${LAN_DHCP_DOMAIN}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/VPN_SUBNET/${VPN_SUBNET}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/MY_USER/${MY_USER}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/MY_PUBKEY/${MY_PUBKEY}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/MY_EMAIL/${MY_EMAIL}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/SERVER_LAN_IP/${SERVER_LAN_IP}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/SERVER_WAN_IP/${SERVER_WAN_IP}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/SERVER_HOSTNAME/${SERVER_HOSTNAME}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/PIHOLE_ADMIN_PW/${PIHOLE_ADMIN_PW}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/CLOUDFLARE_API_KEY/${CLOUDFLARE_API_KEY}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+		sed -i "s/DDNS_SUBDOMAIN/${DDNS_SUBDOMAIN}/g" "/home/${MY_USER}/docker/${d%%/}/docker-compose.yml"
+	done
+
+	warn "\nAfter reboot, run '~/docker/update x' to get the x container started."
+	
+	return 0
 }
 
 #######################################
