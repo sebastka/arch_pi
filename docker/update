@@ -1,0 +1,47 @@
+#!/bin/bash
+set -e
+#set -x
+
+#######################################
+#	Remove docker image and recreate
+#
+#	Arguments:
+#		container_name (string): name of the container to recreate
+#	Outputs:
+#		None
+#	Returns:
+#		1 upon error
+#		0 otherwise
+#######################################
+function main() {
+	local readonly USAGE="Usage: update container_name"
+
+	if [[ "${#}" -ne 1 ]]; then
+		err "Error: one argument expected, ${#} received"
+		err "${USAGE}"
+		return 1
+	fi
+
+	local readonly container="${1}"
+
+	if [ "${EUID}" -ne 0 ]; then
+		err "Please run as root"
+		return 2
+	fi
+
+	# Since we're removing the container, we'll have no DNS server when updating pihole
+	echo "nameserver 1.1.1.1" > /etc/resolv.conf
+	systemctl reload systemd-networkd
+
+	cd "${container}"
+	[[ ! -z $(docker ps | grep ${container}) ]] && docker stop "${container}"
+	[[ ! -z $(docker ps -a | grep ${container}) ]] && docker rm "${container}"
+	docker-compose up --detach
+
+	# Set DNS back to the pi
+	echo "nameserver 127.0.0.1" > /etc/resolv.conf
+
+	return 0
+}
+
+main "${@}"; exit

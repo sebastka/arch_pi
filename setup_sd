@@ -64,8 +64,8 @@ function main() {
 	sudo vim "root/etc/systemd/network/${INTERFACE}.network"
 
 	# Copy config and install script to root's home folder
-	sudo cp -a install .env .env.example docker-compose.yml etc/ root/root/
-	sudo chown -R root:root root/root/install root/root/.env root/root/.env.example root/root/docker-compose.yml root/root/etc/
+	sudo cp -a install .env .env.example docker/ etc/ root/root/
+	sudo chown -R root:root root/root/install root/root/.env root/root/.env.example root/root/docker/ root/root/etc/
 
 	sudo umount root/boot/ root/
 	rmdir root
