@@ -64,6 +64,7 @@ function main() {
 	pacman-key --populate archlinuxarm
 	pacman -Syu
 	pacman -S --needed sudo base-devel git nftables vim
+	pacman -S --needed starship powerline
 
 	# Configure sudo
 	warn "Allow members of wheel group to run sudo"
