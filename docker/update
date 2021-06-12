@@ -29,6 +29,11 @@ function main() {
 		return 2
 	fi
 
+	if [[ ! -f "${container}/docker-compose.yml" ]]; then
+		err "Error: docker-compose not found"
+		return 3
+	fi
+
 	# Since we're removing the container, we'll have no DNS server when updating pihole
 	echo "nameserver 1.1.1.1" > /etc/resolv.conf
 	systemctl reload systemd-networkd
@@ -42,6 +47,11 @@ function main() {
 	echo "nameserver 127.0.0.1" > /etc/resolv.conf
 
 	return 0
+}
+
+# Print to stderr (from Google)
+function err() {
+        echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: ${*}" >&2
 }
 
 main "${@}"; exit
