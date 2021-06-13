@@ -15,7 +15,7 @@ function main() {
 	local readonly USAGE="Usage: setup_sd sd"
 
 	if [[ "${#}" -ne 1 ]]; then
-		err "Error: one argument required"
+		err "Error: one argument required, ${#} received"
 		err "${USAGE}"
 		return 1
 	fi

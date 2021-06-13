@@ -16,7 +16,7 @@ function main() {
 	local readonly USAGE="Usage: install"
 
 	if [[ "${#}" -ne 0 ]]; then
-		err "Error: no argument required"
+		err "Error: no argument required, ${#} received"
 		err "${USAGE}"
 		return 1
 	fi
