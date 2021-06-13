@@ -76,6 +76,7 @@ function main() {
 	# Setup services
 	#pacman -S --needed cargo && install_from_aur paru
 	setup_nftables
+	#setup_deluge
 	setup_sshd
 	setup_openvpn
 	setup_unbound
@@ -115,7 +116,7 @@ function setup_nftables() {
 	[[ -f /etc/nftables.conf ]] && mv /etc/nftables.conf /etc/nftables.conf.bak
 	
 	# Set new config
-	cp /root/etc/nftables.conf /etc/nftables.conf
+	cp /root/root/etc/nftables.conf /etc/nftables.conf
 	sed -i "s/MY_LAN/${MY_LAN}/g" /etc/nftables.conf
 	sed -i "s/MY_VPN_SUBNET/${VPN_SUBNET}/g" /etc/nftables.conf
 	vim /etc/nftables.conf
@@ -126,11 +127,28 @@ function setup_nftables() {
 }
 
 #######################################
+#         Setup deluge                #
+#######################################
+function setup_deluge() {
+	pacman -S --needed deluge
+	cp -a /root/root/srv/deluge/.config /srv/deluge/
+
+	mkdir -p /mnt/torrent/data /mnt/torrent/add
+	chown -R deluge:deluge /mnt/torrent /srv/deluge/
+	chmod -R 770 /mnt/torrent
+	usermod -a -G deluge "${MY_USER}"
+
+	systemctl enable deluged deluge-web
+
+	return 0
+}
+
+#######################################
 #         Setup sshd                  #
 #######################################
 function setup_sshd() {
 	mv /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
-	cp /root/etc/ssh/sshd_config /etc/ssh/sshd_config
+	cp /root/root/etc/ssh/sshd_config /etc/ssh/sshd_config
 	vim /etc/ssh/sshd_config
 
 	# Add personal pubkey
@@ -176,7 +194,7 @@ function setup_openvpn() {
 		/etc/openvpn/server/
 	
 	# Fetch openvpn config
-	cp /root/etc/openvpn/server/server.conf "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
+	cp /root/root/etc/openvpn/server/server.conf "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
 	sed -i "s/SERVER_HOSTNAME/${SERVER_HOSTNAME}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
 	sed -i "s/MY_LAN/${MY_LAN}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
 	sed -i "s/SERVER_LAN_IP/${SERVER_LAN_IP}/g" "/etc/openvpn/server/${SERVER_HOSTNAME}.conf"
@@ -202,12 +220,12 @@ function setup_unbound() {
 
 	# Backup old config and fetch ours
 	[[ -f /etc/unbound/unbound.conf ]] && mv /etc/unbound/unbound.conf /etc/unbound/unbound.conf.bak
-	cp /root/etc/unbound/unbound.conf /etc/unbound/unbound.conf
+	cp /root/root/etc/unbound/unbound.conf /etc/unbound/unbound.conf
 	vim /etc/unbound/unbound.conf
 
 	# Fetch and auto-update root.hints
-	cp /root/etc/systemd/system/roothints.service /etc/systemd/system/
-	cp /root/etc/systemd/system/roothints.timer /etc/systemd/system/
+	cp /root/root/etc/systemd/system/roothints.service /etc/systemd/system/
+	cp /root/root/etc/systemd/system/roothints.timer /etc/systemd/system/
 	systemctl enable --now roothints.timer unbound
 
 	return 0

@@ -39,19 +39,19 @@ function main() {
 	sudo mkfs.ext4 "${SD}p2"
 
 	# Mount
-	mkdir -p root/ && sudo mount "${SD}p2" root/
-	sudo mkdir -p root/boot && sudo mount "${SD}p1" root/boot/
+	mkdir -p mnt/ && sudo mount "${SD}p2" mnt/
+	sudo mkdir -p mnt/boot && sudo mount "${SD}p1" mnt/boot/
 
 	# Get img and copy to sd
 	[[ -f ArchLinuxARM-rpi-4-latest.tar.gz ]] && rm ArchLinuxARM-rpi-4-latest.tar.gz
 	wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-4-latest.tar.gz
-	sudo bsdtar -xpf ArchLinuxARM-rpi-4-latest.tar.gz -C root
+	sudo bsdtar -xpf ArchLinuxARM-rpi-4-latest.tar.gz -C mnt
 	rm ArchLinuxARM-rpi-4-latest.tar.gz
 
 	# aarch64
 	#[[ ! -f ArchLinuxARM-rpi-aarch64-latest.tar.gz ]] && wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz
-	#sudo bsdtar -xpf ArchLinuxARM-rpi-aarch64-latest.tar.gz -C root
-	#sed -i 's/mmcblk0/mmcblk1/g' root/etc/fstab
+	#sudo bsdtar -xpf ArchLinuxARM-rpi-aarch64-latest.tar.gz -C mnt
+	#sed -i 's/mmcblk0/mmcblk1/g' mnt/etc/fstab
 	#rm ArchLinuxARM-rpi-aarch64-latest.tar.gz
 
 	sudo sync
@@ -60,15 +60,15 @@ function main() {
 	warn "Please set up a static IP for the PI"
 	nconfig="[Match]\nName=${INTERFACE}\n\n[Network]\nDHCP=no\nAddress=${SERVER_LAN_IP}/24\nGateway=${LAN_GATEWAY}\nDNS=1.1.1.1\nDNS=1.0.0.1\nDNSSEC=no\n"
 
-	sudo bash -c "echo -e \"${nconfig}\" > root/etc/systemd/network/${INTERFACE}.network"
-	sudo vim "root/etc/systemd/network/${INTERFACE}.network"
+	sudo bash -c "echo -e \"${nconfig}\" > mnt/etc/systemd/network/${INTERFACE}.network"
+	sudo vim "mnt/etc/systemd/network/${INTERFACE}.network"
 
 	# Copy config and install script to root's home folder
-	sudo cp -a install .env .env.example docker/ etc/ root/root/
-	sudo chown -R root:root root/root/install root/root/.env root/root/.env.example root/root/docker/ root/root/etc/
+	sudo cp -a install .env docker/ root/ mnt/root/
+	sudo chown -R root:root mnt/root/install mnt/root/.env mnt/root/.env.example mnt/root/docker/ mnt/root/etc/
 
-	sudo umount root/boot/ root/
-	rmdir root
+	sudo umount mnt/boot/ mnt/
+	rmdir mnt
 
 	echo -e "\nDone\n"
 
