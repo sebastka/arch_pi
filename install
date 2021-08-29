@@ -34,6 +34,15 @@ function main() {
 	# Load .env
 	set -o allexport && source .env && set +o allexport
 
+	# If wireless connection, authenticate
+	if [[ "${MY_INTERFACE:1}" == "w" ]]; then
+		wifi-menu -o
+		systemctl restart systemd-networkd
+
+		curl ifconfig.me
+		warn "If your public IP was shown, wireless connectivity is working."
+	fi
+
 	# Make sure we are ready
 	cat .env
 	warn	"\nBefore continuing, please make sure that:\n" \
@@ -74,7 +83,7 @@ function main() {
 	vim /etc/makepkg.conf
 
 	# Setup services
-	#pacman -S --needed cargo && install_from_aur paru
+	install_from_aur paru-bin
 	setup_nftables
 	#setup_deluge
 	setup_sshd
@@ -117,6 +126,7 @@ function setup_nftables() {
 	
 	# Set new config
 	cp /root/root/etc/nftables.conf /etc/nftables.conf
+	sed -i "s/MY_INTERFACE/${MY_INTERFACE}/g" /etc/nftables.conf
 	sed -i "s/MY_LAN/${MY_LAN}/g" /etc/nftables.conf
 	sed -i "s/MY_VPN_SUBNET/${VPN_SUBNET}/g" /etc/nftables.conf
 	vim /etc/nftables.conf

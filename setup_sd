@@ -43,23 +43,29 @@ function main() {
 	sudo mkdir -p mnt/boot && sudo mount "${SD}p1" mnt/boot/
 
 	# Get img and copy to sd
-	[[ -f ArchLinuxARM-rpi-4-latest.tar.gz ]] && rm ArchLinuxARM-rpi-4-latest.tar.gz
-	wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-4-latest.tar.gz
-	sudo bsdtar -xpf ArchLinuxARM-rpi-4-latest.tar.gz -C mnt
-	rm ArchLinuxARM-rpi-4-latest.tar.gz
 
-	# aarch64
-	#[[ ! -f ArchLinuxARM-rpi-aarch64-latest.tar.gz ]] && wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz
-	#sudo bsdtar -xpf ArchLinuxARM-rpi-aarch64-latest.tar.gz -C mnt
-	#sed -i 's/mmcblk0/mmcblk1/g' mnt/etc/fstab
-	#rm ArchLinuxARM-rpi-aarch64-latest.tar.gz
+	# ARMv7
+	#[[ -f ArchLinuxARM-rpi-4-latest.tar.gz ]] && rm ArchLinuxARM-rpi-4-latest.tar.gz
+	#wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-4-latest.tar.gz
+	#sudo bsdtar -xpf ArchLinuxARM-rpi-4-latest.tar.gz -C mnt
+	#rm ArchLinuxARM-rpi-4-latest.tar.gz
+
+	# AArch64
+	[[ -f ArchLinuxARM-rpi-aarch64-latest.tar.gz ]] rm ArchLinuxARM-rpi-aarch64-latest.tar.gz
+	wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz
+	sudo bsdtar -xpf ArchLinuxARM-rpi-aarch64-latest.tar.gz -C mnt
+	sudo sed -i 's/mmcblk0/mmcblk1/g' mnt/etc/fstab
+	rm ArchLinuxARM-rpi-aarch64-latest.tar.gz
 
 	sudo sync
 
 	# Set up static ip
 	warn "Please set up a static IP for the PI"
+
+	# .network file
 	nconfig="[Match]\nName=${INTERFACE}\n\n[Network]\nDHCP=no\nAddress=${SERVER_LAN_IP}/24\nGateway=${LAN_GATEWAY}\nDNS=1.1.1.1\nDNS=1.0.0.1\nDNSSEC=no\n"
 
+	# Create config file and check it
 	sudo bash -c "echo -e \"${nconfig}\" > mnt/etc/systemd/network/${INTERFACE}.network"
 	sudo vim "mnt/etc/systemd/network/${INTERFACE}.network"
 
@@ -67,6 +73,8 @@ function main() {
 	sudo cp -a install .env docker/ root/ mnt/root/
 	sudo chown -R root:root mnt/root/install mnt/root/.env mnt/root/.env.example mnt/root/docker/ mnt/root/etc/
 
+	# Will now unmount
+	warn "Will now unmount"
 	sudo umount mnt/boot/ mnt/
 	rmdir mnt
 
