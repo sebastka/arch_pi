@@ -51,7 +51,7 @@ function main() {
 	#rm ArchLinuxARM-rpi-4-latest.tar.gz
 
 	# AArch64
-	[[ -f ArchLinuxARM-rpi-aarch64-latest.tar.gz ]] rm ArchLinuxARM-rpi-aarch64-latest.tar.gz
+	[[ -f ArchLinuxARM-rpi-aarch64-latest.tar.gz ]] && rm ArchLinuxARM-rpi-aarch64-latest.tar.gz
 	wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz
 	sudo bsdtar -xpf ArchLinuxARM-rpi-aarch64-latest.tar.gz -C mnt
 	sudo sed -i 's/mmcblk0/mmcblk1/g' mnt/etc/fstab
