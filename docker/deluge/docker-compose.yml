@@ -1,0 +1,20 @@
+version: "2.1"
+
+## https://hub.docker.com/r/linuxserver/deluge
+services:
+  deluge:
+    container_name: deluge
+    image: ghcr.io/linuxserver/deluge
+    environment:
+      - PUID=CONFIG_USER_UID
+      - PGID=CONFIG_USER_GID
+      - TZ=Europe/Oslo
+      - DELUGE_LOGLEVEL=error #optional
+    volumes:
+      - './etc-duckdns/:/config'
+      - './downloads/:/downloads'
+    ports:
+      - 8112:8112
+      - 6881:6881
+      - 6881:6881/udp
+    restart: unless-stopped

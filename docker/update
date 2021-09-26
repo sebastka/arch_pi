@@ -34,17 +34,19 @@ function main() {
 		return 3
 	fi
 
-	# Since we're removing the container, we'll have no DNS server when updating pihole
+	# Since we're removing the container, pihole (127.0.0.1:53) will be down
 	echo "nameserver 1.1.1.1" > /etc/resolv.conf
-	systemctl reload systemd-networkd
 
-	cd "${container}"
 	[[ ! -z $(docker ps | grep ${container}) ]] && docker stop "${container}"
 	[[ ! -z $(docker ps -a | grep ${container}) ]] && docker rm "${container}"
+
+	pushd "${container}"
+	docker-compose pull
 	docker-compose up --detach
+	popd
 
 	# Set DNS back to the pi
-	echo "nameserver 127.0.0.1" > /etc/resolv.conf
+	echo -e "nameserver 127.0.0.1\noptions trust-ad" > /etc/resolv.conf
 
 	return 0
 }

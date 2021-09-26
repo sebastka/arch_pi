@@ -1,0 +1,15 @@
+version: "2.1"
+
+## https://hub.docker.com/r/linuxserver/duckdns/
+services:
+  homer:
+    container_name: homer
+    image: b4bz/homer:latest
+    environment:
+      - PUID=CONFIG_USER_UID
+      - PGID=CONFIG_USER_GID
+    volumes:
+      - './www-assets/:/www/assets/'
+    ports:
+      - 80:8080
+    restart: unless-stopped

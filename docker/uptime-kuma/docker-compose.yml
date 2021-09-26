@@ -1,0 +1,15 @@
+version: "2.1"
+
+## https://github.com/louislam/uptime-kuma
+services:
+  uptime-kuma:
+    container_name: uptime-kuma
+    image: louislam/uptime-kuma:1
+    environment:
+      - PUID=CONFIG_USER_UID
+      - PGID=CONFIG_USER_GID
+    volumes:
+      - './etc-uptimekuma/:/app/data'
+    ports:
+      - 3001:3001
+    restart: unless-stopped

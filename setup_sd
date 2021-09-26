@@ -1,8 +1,9 @@
 #!/bin/bash
 set -e
+#set -x
 
 #######################################
-#	Setup SD card with arch for ARMv7
+#	Setup SD card with arch for Raspberry Pi 4
 #	https://archlinuxarm.org/platforms/armv8/broadcom/raspberry-pi-4
 #
 #	Arguments:
@@ -20,14 +21,37 @@ function main() {
 		return 1
 	fi
 
-	if [[ ! -f .env ]]; then
-		err "Please configure .env"
+	if [ "${EUID}" -eq 0 ]; then
+		err "Error: Please do NOT run as root"
 		return 2
+	fi
+
+	if [[ ! -f .env ]]; then
+		err "Error: Please configure .env"
+		return 3
 	fi
 
 	# Load .env
 	set -o allexport && source .env && set +o allexport
-	SD="${1}"
+	local readonly SD="${1}"
+
+	prepare_sd "${SD}"
+	fetch_arch
+	setup_network
+	configure
+	finishing
+
+	echo -e "\n\nDone"
+
+	return 0
+}
+
+#######################################
+#            Prepare SD               #
+#######################################
+function prepare_sd() {
+	[[ "${#}" -ne 1 ]] && return 1
+	local readonly SD="${1}"
 
 	# Checking if $SD exists and ask for confirmation
 	[[ ! -e "${SD}" ]] && echo "The device ${SD} does not exist. Aborting." && return 1
@@ -35,53 +59,131 @@ function main() {
 
 	# Prepare partitions
 	sudo bash -c "echo -e \"o\nn\np\n1\n\n+200M\nt\nc\nn\np\n2\n\n\n\nw\" | fdisk ${SD}" # Sorry \_(˚-˚)_/
-	sudo mkfs.vfat "${SD}p1"
+	sudo mkfs.vfat -F 32 "${SD}p1"
 	sudo mkfs.ext4 "${SD}p2"
 
 	# Mount
 	mkdir -p mnt/ && sudo mount "${SD}p2" mnt/
 	sudo mkdir -p mnt/boot && sudo mount "${SD}p1" mnt/boot/
 
-	# Get img and copy to sd
+	return 0
+}
 
-	# ARMv7
-	#[[ -f ArchLinuxARM-rpi-4-latest.tar.gz ]] && rm ArchLinuxARM-rpi-4-latest.tar.gz
-	#wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-4-latest.tar.gz
-	#sudo bsdtar -xpf ArchLinuxARM-rpi-4-latest.tar.gz -C mnt
-	#rm ArchLinuxARM-rpi-4-latest.tar.gz
+#######################################
+#   Fetching and copying arch to SD   #
+#######################################
+function fetch_arch() {
+	warn "Fetching arch and copying to SD..."
 
-	# AArch64
-	[[ -f ArchLinuxARM-rpi-aarch64-latest.tar.gz ]] && rm ArchLinuxARM-rpi-aarch64-latest.tar.gz
-	wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz
-	sudo bsdtar -xpf ArchLinuxARM-rpi-aarch64-latest.tar.gz -C mnt
+	# AArch64 (ARMv8)
+	if [[ ! -f ArchLinuxARM-rpi-aarch64-latest.tar.gz ]]; then
+		echo -e "\nDownloading ArchLinuxARM-rpi-aarch64-latest.tar.gz"
+		wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz
+		wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz.md5
+
+		# Check integrity
+		if ! md5sum --check ArchLinuxARM-rpi-aarch64-latest.tar.gz.md5 &>/dev/null; then
+			rm http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz
+			rm http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz.md5
+
+			err "Error: checksum failed"
+			return 4
+		fi
+
+		rm http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz.md5
+	fi
+
+	echo -e "\nDecompressing..." && sudo bsdtar -xpf ArchLinuxARM-rpi-aarch64-latest.tar.gz -C mnt
 	sudo sed -i 's/mmcblk0/mmcblk1/g' mnt/etc/fstab
-	rm ArchLinuxARM-rpi-aarch64-latest.tar.gz
 
-	sudo sync
-
-	# Set up static ip
-	warn "Please set up a static IP for the PI"
-
-	# .network file
-	nconfig="[Match]\nName=${INTERFACE}\n\n[Network]\nDHCP=no\nAddress=${SERVER_LAN_IP}/24\nGateway=${LAN_GATEWAY}\nDNS=1.1.1.1\nDNS=1.0.0.1\nDNSSEC=no\n"
-
-	# Create config file and check it
-	sudo bash -c "echo -e \"${nconfig}\" > mnt/etc/systemd/network/${INTERFACE}.network"
-	sudo vim "mnt/etc/systemd/network/${INTERFACE}.network"
+	echo -e "Syncing..."
+	sync
 
 	# Copy config and install script to root's home folder
 	sudo cp -a install .env docker/ root/ mnt/root/
-	sudo chown -R root:root mnt/root/install mnt/root/.env mnt/root/.env.example mnt/root/docker/ mnt/root/etc/
-
-	# Will now unmount
-	warn "Will now unmount"
-	sudo umount mnt/boot/ mnt/
-	rmdir mnt
-
-	echo -e "\nDone\n"
+	sudo chown -R root:root mnt/root/install mnt/root/.env mnt/root/docker/ mnt/root/root/
 
 	return 0
 }
+
+#######################################
+#          Setup Network              #
+#######################################
+function setup_network() {
+	warn "\nSetting up the network..."
+
+	# If wireless
+	if [[ ! -z "${CONFIG_LAN_WIFI_SSID}" ]]; then
+		echo -e "\n\nSetting up WiFi..."
+
+		sudo mkdir -p mnt/etc/wpa_supplicant/
+		sudo bash -c "wpa_passphrase "${CONFIG_LAN_WIFI_SSID}" "${CONFIG_LAN_WIFI_PASSPHRASE}" > mnt/etc/wpa_supplicant/wpa_supplicant-${CONFIG_LAN_INTERFACE}.conf"
+
+		# sudo systemctl enable wpa_supplicant@wlan0
+		sudo ln -s ../../../../usr/lib/systemd/system/wpa_supplicant@.service "mnt/etc/systemd/system/multi-user.target.wants/wpa_supplicant@${CONFIG_LAN_INTERFACE}.service"
+	fi
+
+	# .network file
+	local readonly cidr="${CONFIG_LAN_IP}/$(echo $CONFIG_LAN_NETWORK | cut -d'/' -f2)"
+	local readonly nconfig="[Match]\nName=${CONFIG_LAN_INTERFACE}\n\n[Network]\nDHCP=no\nAddress=${cidr}\nGateway=${CONFIG_LAN_GATEWAY}"
+
+	# Remove conflicting config
+	sudo mkdir -p mnt/etc/systemd/network/bak
+	sudo mv mnt/etc/systemd/network/*.network mnt/etc/systemd/network/bak
+
+	# Create config file and check it
+	sudo bash -c "echo -e \"${nconfig}\" > mnt/etc/systemd/network/${CONFIG_LAN_INTERFACE}.network"
+	sudo nano "mnt/etc/systemd/network/${CONFIG_LAN_INTERFACE}.network"
+
+	# Copy iptables base config
+	mkdir -p mnt/etc/iptables/
+	[[ -f mnt/etc/iptables/iptables.rules ]] && sudo mv mnt/etc/iptables/iptables.rules mnt/etc/iptables/iptables.rules.bak
+	sudo cp root/etc/iptables/iptables.rules mnt/etc/iptables/iptables.rules
+
+	# Disable systemd-resolved, since it conflicts with dnsmasq on port 53
+	[[ -f mnt/etc/systemd/system/dbus-org.freedesktop.resolve1.service ]] && sudo rm mnt/etc/systemd/system/dbus-org.freedesktop.resolve1.service
+	[[ -f mnt/etc/systemd/system/multi-user.target.wants/systemd-resolved.service ]] && sudo rm mnt/etc/systemd/system/multi-user.target.wants/systemd-resolved.service
+
+	# Set up Cloudflare's DNS
+	sudo bash -c "rm mnt/etc/resolv.conf && echo -e \"nameserver 1.1.1.1\nnameserver 1.0.0.1\" > mnt/etc/resolv.conf"
+
+	return 0
+}
+
+#######################################
+#             Configure               #
+#######################################
+function configure() {
+	warn "\n\nConfiguring the system"
+	
+	# Set hostname and hosts
+	sudo bash -c "echo \"${CONFIG_SERVER_HOSTNAME}\" > mnt/etc/hostname"
+	sudo bash -c "echo -e \"127.0.0.1\t\tlocalhost\n127.0.1.1\t\t${CONFIG_SERVER_HOSTNAME}.${CONFIG_USER_DOMAIN}\t${CONFIG_SERVER_HOSTNAME}\n${CONFIG_LAN_IP}\t\t${CONFIG_SERVER_HOSTNAME}.${CONFIG_USER_DOMAIN}\t${CONFIG_SERVER_HOSTNAME}\n\" > mnt/etc/hosts"
+
+	# Setup locale
+	sudo sed -i "s/#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/g" mnt/etc/locale.gen
+
+	# Set MAKEFLAGS="-j4"
+	sudo sed -i "s/#MAKEFLAGS=\"-j2\"/MAKEFLAGS=\"-j4\"/g" mnt/etc/makepkg.conf
+
+	return 0
+}
+
+#######################################
+#     Terminate (unmount...)          #
+#######################################
+function finishing() {
+	warn "\n\nWill now unmount"
+
+	sudo umount mnt/boot/ mnt/
+	rmdir mnt
+
+	return 0
+}
+
+#######################################
+#       Div helpers                   #
+#######################################
 
 function warn() {
 	echo -e "${*}"
