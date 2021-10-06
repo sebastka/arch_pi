@@ -1,6 +1,6 @@
-# Install script for Arch on ARMv7
+# Install script for Arch on ARMv8 (aarch64)
 
-Installs and configures `nftables`, `deluge` `ssh`, `openvpn`, `unbound`, `Pihole` and `cloudflared-ddns`.
+Set up Arch Linux (ARMv8) with VPN server, Unbound and Docker. 
 
 ## Usage
 

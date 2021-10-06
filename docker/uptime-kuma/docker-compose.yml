@@ -10,6 +10,10 @@ services:
       - PGID=CONFIG_USER_GID
     volumes:
       - './etc-uptimekuma/:/app/data'
+    environment:
+      - PUID=CONFIG_USER_UID
+      - PGID=CONFIG_USER_GID
+      - TZ=Europe/Oslo
     ports:
       - 3001:3001
     restart: unless-stopped

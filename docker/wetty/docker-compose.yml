@@ -1,0 +1,17 @@
+version: "2.1"
+
+## https://github.com/butlerx/wetty
+services:
+  wetty:
+    container_name: wetty
+    image: wettyoss/wetty
+    tty: true
+    #working_dir: /usr/src/app
+    environment:
+      - PUID=CONFIG_USER_UID
+      - PGID=CONFIG_USER_GID
+      - TZ=Europe/Oslo
+      - SSHHOST=127.0.0.1
+    ports:
+      - 3002:3000
+    restart: unless-stopped

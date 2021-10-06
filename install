@@ -56,7 +56,7 @@ function main() {
 	pacman-key --init
 	pacman-key --populate archlinuxarm
 	pacman -Syu
-	pacman -S --needed sudo base-devel dnsutils git vim cronie
+	pacman -S --needed sudo base-devel dnsutils git vim cronie wget
 	pacman -S --needed ${CONFIG_SYSTEM_EXTRA_PACKAGES}
 	install_from_aur ${CONFIG_SYSTEM_EXTRA_PACKAGES_AUR}
 	systemctl enable --now cronie
@@ -322,6 +322,7 @@ function install_docker() {
 
 	# Update variables update and in each docker-compose.yml
 	env_replace "/home/${CONFIG_USER_NAME}/docker/update"
+	env_replace "/home/${CONFIG_USER_NAME}/docker/homer/config.yml"
 
 	for f in $(ls -f /home/${CONFIG_USER_NAME}/docker/*/docker-compose.yml); do
 		env_replace "${f}"
