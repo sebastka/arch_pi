@@ -186,7 +186,7 @@ function install_openvpn() {
 	# Set up Easy-rsa vars
 	mv "${EASYRSA_VARS_FILE}" "${EASYRSA_VARS_FILE}.bak"
 	echo "set_var EASYRSA_ALGO ec" > "${EASYRSA_VARS_FILE}"
-	echo "set_var EASYRSA_CURVE sect571r1" >> "${EASYRSA_VARS_FILE}"
+	echo "set_var EASYRSA_CURVE secp521r1" >> "${EASYRSA_VARS_FILE}"
 	echo "set_var EASYRSA_DIGEST \"sha512\"" >> "${EASYRSA_VARS_FILE}"
 	echo "set_var EASYRSA_NS_SUPPORT \"no\"" >> "${EASYRSA_VARS_FILE}"
 	vim "${EASYRSA_VARS_FILE}"
@@ -209,13 +209,8 @@ function install_openvpn() {
 		/etc/easy-rsa/pki/crl.pem \
 		/etc/openvpn/server/
 	
-	# Setup jail
-	mkdir -p /etc/openvpn/server/jail/tmp/
-	ln -s ../crl.pem /etc/openvpn/server/jail/crl.pem
-
 	# Fetch openvpn config
 	cp /root/root/etc/openvpn/server/server.conf "/etc/openvpn/server/${CONFIG_SERVER_HOSTNAME}.conf"
-	cp /root/root/etc/openvpn/client/template.conf /etc/openvpn/client/
 
 	# Update config file with env
 	env_replace "/etc/openvpn/server/${CONFIG_SERVER_HOSTNAME}.conf"
@@ -241,7 +236,7 @@ function install_openvpn() {
 
 	# Permissions
 	mkdir -p /etc/openvpn/revoked/
-	chown -R openvpn:network /etc/openvpn/{server,client,revoked}
+	chown -R openvpn:network /etc/openvpn/server/ /etc/openvpn/client/ /etc/openvpn/revoked/
 
 	systemctl enable "openvpn-server@${CONFIG_SERVER_HOSTNAME}"
 
