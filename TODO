@@ -1,4 +1,3 @@
-- Setup/Fix OpenVPN
 - Setup/Fix Wireguard
 - Make unbound a part of pihole container
 - Fix WiFi setup
