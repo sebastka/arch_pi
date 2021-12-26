@@ -1,0 +1,6 @@
+[Unit]
+Description=Autodownload updates without installing
+
+[Service]
+Type=oneshot
+ExecStart=pacman -Syuw --noconfirm

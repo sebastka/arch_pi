@@ -1,0 +1,42 @@
+version: "3"
+
+networks:
+  app-global:
+    external: true
+  mariadb-internal:
+
+## https://github.com/TheAxelander/OpenBudgeteer
+services:
+  openbudgeteer:
+    container_name: openbudgeteer
+    depends_on:
+      - mariadb
+    #build: https://raw.githubusercontent.com/TheAxelander/OpenBudgeteer/master/OpenBudgeteer.Blazor/Dockerfile
+    image: axelander/openbudgeteer
+    environment:
+      - Connection:Server=openbudgeteer-mariadb
+      - Connection:Port=3306
+      - Connection:Database=openbudgeteer
+      - Connection:User=openbudgeteer
+      - Connection:Password=CONFIG_OPENBUDGETEER_MYSQL_USER_PW
+    ports:
+      - 50103:80
+    networks:
+      - app-global
+      - mariadb-internal
+    restart: unless-stopped
+
+  mariadb:
+    container_name: openbudgeteer-mariadb
+    image: mariadb:latest
+    environment:
+      MYSQL_ROOT_PASSWORD: CONFIG_OPENBUDGETEER_MYSQL_ROOT_PW
+      MYSQL_DATABASE: openbudgeteer
+      MYSQL_USER: openbudgeteer
+      MYSQL_PASSWORD: CONFIG_OPENBUDGETEER_MYSQL_USER_PW
+    networks:
+      - mariadb-internal
+    restart: unless-stopped
+
+volumes:
+  data:

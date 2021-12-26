@@ -6,11 +6,10 @@ services:
     container_name: homer
     image: b4bz/homer:latest
     environment:
-      - UID=CONFIG_USER_UID
-      - GID=CONFIG_USER_GID
-      - TZ=Europe/Oslo
+      UID: CONFIG_USER_UID
+      GID: CONFIG_USER_GID
+      TZ: Europe/Oslo
     volumes:
-      - './www-assets/:/www/assets/'
       - './logos/:/www/logos/'
       - './config.yml:/www/assets/config.yml'
       - './logos/favicon-16x16.png:/www/assets/icons/favicon-16x16.png'

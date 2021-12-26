@@ -1,0 +1,18 @@
+version: "2.1"
+
+## https://github.com/nirui/sshwifty
+## Run before:
+# - openssl req -newkey rsa:4096 -nodes -keyout domain.key -x509 -days 90 -out domain.crt
+# - chmod ugo+r domain.*
+services:
+  sshwifty:
+    container_name: sshwifty
+    image: niruix/sshwifty:latest
+    environment:
+      TZ: Europe/Oslo
+    volumes: # Since there is no SSHWIFTY_DOCKER_TLSCERTFILE env var, use a little hack (see /sshwifty.sh):
+      - './domain.crt:/tmp/cert'
+      - './domain.key:/tmp/certkey'
+    ports:
+      - 50101:8182
+    restart: unless-stopped

@@ -6,14 +6,9 @@ services:
     container_name: uptime-kuma
     image: louislam/uptime-kuma:1
     environment:
-      - PUID=CONFIG_USER_UID
-      - PGID=CONFIG_USER_GID
+      TZ: Europe/Oslo
     volumes:
       - './etc-uptimekuma/:/app/data'
-    environment:
-      - PUID=CONFIG_USER_UID
-      - PGID=CONFIG_USER_GID
-      - TZ=Europe/Oslo
     ports:
-      - 3001:3001
+      - 50102:3001
     restart: unless-stopped

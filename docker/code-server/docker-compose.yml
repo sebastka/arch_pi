@@ -6,17 +6,19 @@ services:
     container_name: code-server
     image: ghcr.io/linuxserver/code-server
     environment:
-      - PUID=CONFIG_USER_UID
-      - PGID=CONFIG_USER_GID
-      - TZ=Europe/Oslo
-      - PASSWORD=CONFIG_CODESERVER_PASSWORD #optional
-#      - HASHED_PASSWORD= #optional
-#      - SUDO_PASSWORD=password #optional
-#      - SUDO_PASSWORD_HASH= #optional
-#      - PROXY_DOMAIN=code-server.my.domain #optional
-#      - UMASK=
+      PUID: CONFIG_USER_UID
+      PGID: CONFIG_USER_GID
+      TZ: Europe/Oslo
+      PASSWORD: CONFIG_CODESERVER_PASSWORD #optional
+      #HASHED_PASSWORD: #optional
+      #SUDO_PASSWORD: password #optional
+      #SUDO_PASSWORD_HASH: #optional
+      #PROXY_DOMAIN: code-server.my.domain #optional
+      #UMASK: 
     volumes:
       - './etc-codeserver/:/config'
+      - '/home/CONFIG_USER_NAME/Dev/:/app/Dev:rw'
+      - '/home/CONFIG_USER_NAME/docker/homer/config.yml:/app/homer-config.yml:rw'
     ports:
-      - 8443:8443
+      - 50104:8443
     restart: unless-stopped

@@ -22,11 +22,11 @@ COMMIT
 -A INPUT -p icmp -m icmp --icmp-type 8 -m limit --limit 1/second -j ACCEPT
 
 # Allow from WAN (OpenVPN and WireGuard)
--A INPUT -i CONFIG_LAN_INTERFACE -p udp --dport 1194 -m state --state NEW -j ACCEPT
+-A INPUT -i CONFIG_LAN_INTERFACE -p udp --dport openvpn -m state --state NEW -j ACCEPT
 -A INPUT -i CONFIG_LAN_INTERFACE -p udp --dport 51820 -m state --state NEW -j ACCEPT
 
 # Allow from LAN and VPN
--A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 22 -m state --state NEW -j ACCEPT
+-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport ssh -m state --state NEW -j ACCEPT
 
 # OpenVPN
 #-A FORWARD -i tun+ -j ACCEPT
@@ -42,34 +42,26 @@ COMMIT
 # Containers
 #
 
-# Code server (webui)
--A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 8843 -m state --state NEW -j ACCEPT
+-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport http -m state --state NEW -j ACCEPT -m comment --comment "Homer (webui)"
 
-# Deluge (webui, torrent)
-#-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 8112 -m state --state NEW -j ACCEPT
-#-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 6881 -m state --state NEW -j ACCEPT
-#-A INPUT -p udp -s CONFIG_TRUSTED_NETWORKS --dport 6881 -m state --state NEW -j ACCEPT
+-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 50100 -m state --state NEW -j ACCEPT -m comment --comment "Pihole (webui)"
+-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport domain -m state --state NEW -j ACCEPT -m comment --comment "Pihole (dns)"
+-A INPUT -p udp -s CONFIG_TRUSTED_NETWORKS --dport domain -m state --state NEW -j ACCEPT -m comment --comment "Pihole (dns)"
+-A INPUT -i eth0 -p udp -s 0.0.0.0 --sport bootpc -d 255.255.255.255 --dport bootps -j ACCEPT -m comment --comment "Pihole (dhcp)"
 
-# Homer (webui)
--A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 80 -m state --state NEW -j ACCEPT
+-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 50101 -m state --state NEW -j ACCEPT -m comment --comment "sshwifty (webui)"
 
-# Pihole (webui, domain, dhcp)
--A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 61234 -m state --state NEW -j ACCEPT
--A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 53 -m state --state NEW -j ACCEPT
--A INPUT -p udp -s CONFIG_TRUSTED_NETWORKS --dport 53 -m state --state NEW -j ACCEPT
--A INPUT -i eth0 -p udp -s 0.0.0.0 --sport 68 -d 255.255.255.255 --dport 67 -j ACCEPT
+-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 50102 -m state --state NEW -j ACCEPT -m comment --comment "Uptime-Kuma (webui)"
 
-# Portainer-ce (webui, agent)
--A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 9000 -m state --state NEW -j ACCEPT
--A INPUT -p tcp -s CONFIG_LAN_NETWORK --dport 8000 -m state --state NEW -j ACCEPT
+-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 50103 -m state --state NEW -j ACCEPT -m comment --comment "OpenBudgeteer (webui)"
 
-# Roundcube (webui)
--A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 55523 -m state --state NEW -j ACCEPT
+-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 50104 -m state --state NEW -j ACCEPT -m comment --comment "Code server (webui)"
 
-# Uptime-Kuma (webui)
--A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 3001 -m state --state NEW -j ACCEPT
+-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 50105 -m state --state NEW -j ACCEPT -m comment --comment "Portainer-ce (webui)"
+#-A INPUT -p tcp -s CONFIG_LAN_NETWORK --dport 8000 -m state --state NEW -j ACCEPT -m comment --comment "Portainer-ce (agent)"
 
-# Wetty (webui)
--A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 3002 -m state --state NEW -j ACCEPT
+-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 50106 -m state --state NEW -j ACCEPT -m comment --comment "Deluge (webui)"
+-A INPUT -p tcp -s CONFIG_TRUSTED_NETWORKS --dport 6881 -m state --state NEW -j ACCEPT -m comment --comment "Deluge (inbound torrent)"
+-A INPUT -p udp -s CONFIG_TRUSTED_NETWORKS --dport 6881 -m state --state NEW -j ACCEPT -m comment --comment "Deluge (inbound torrent)"
 
 COMMIT
