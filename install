@@ -175,15 +175,13 @@ install_docker() {
     systemctl enable docker # Reboot is needed before it can start
 
     cp -a /root/arch_pi/docker/ "/home/$CONFIG_USER_NAME/"
-    chown -R "$CONFIG_USER_NAME:$CONFIG_USER_NAME" "/home/$CONFIG_USER_NAME/docker/"
 
-    # Set up static leases for PiHole (if provided)
-    if [ ! -z "$CONFIG_PIHOLE_DHCP_STATIC_LEASE" ]; then
-        mkdir -p "/home/$CONFIG_USER_NAME/docker/pihole/etc-dnsmasq.d"
-        echo "$CONFIG_PIHOLE_DHCP_STATIC_LEASE" > "/home/$CONFIG_USER_NAME/docker/pihole/etc-dnsmasq.d/04-pihole-static-dhcp.conf"
-        sudo chown -R "$CONFIG_USER_NAME:$CONFIG_USER_NAME" "/home/$CONFIG_USER_NAME/docker/pihole/etc-dnsmasq.d/"
-        sudo chmod -R 755 "/home/$CONFIG_USER_NAME/docker/pihole/etc-dnsmasq.d/"
-    fi
+    # Some containers require an initial setup
+    find /home/"$CONFIG_USER_NAME"/docker/*/prepare.sh | while read f; do
+        . "$f"
+    done
+
+    chown -R "$CONFIG_USER_NAME:$CONFIG_USER_NAME" "/home/$CONFIG_USER_NAME/docker/"
 
     # Terminate
     printf '\nAfter reboot, run "~/docker/update x" to get the x container started.\n'
