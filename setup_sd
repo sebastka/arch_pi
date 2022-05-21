@@ -43,7 +43,7 @@ main() {
 load_env() {
     set -a;
     
-    . "$path/.env";
+    . "$path/.env"
 
     # Trusted networks (for firewall)
     CONFIG_TRUSTED_NETWORKS="$CONFIG_LAN_NETWORK"
@@ -93,7 +93,7 @@ iso_write() {
 
     printf '\nVerifying arch iso...\n'
     # Check md5sum
-    if ! md5sum -c "$iso_name.md5" > /dev/null; then
+    if ! md5sum -c "$iso_name.md5" >/dev/null; then
         err "Error: checksum failed"
         return 3
     fi
@@ -129,7 +129,7 @@ setup_network() {
     # Create config file and check it
     printf '[Match]\nName=%s\n\n[Network]\nDHCP=no\nAddress=%s\nGateway=%s\n' \
         "$CONFIG_LAN_INTERFACE" "$cidr" "$CONFIG_LAN_GATEWAY" \
-        | sudo tee "mnt/etc/systemd/network/$CONFIG_LAN_INTERFACE.network" > /dev/null
+        | sudo tee "mnt/etc/systemd/network/$CONFIG_LAN_INTERFACE.network" >/dev/null
 
     sudoedit "mnt/etc/systemd/network/$CONFIG_LAN_INTERFACE.network"
 
@@ -139,7 +139,7 @@ setup_network() {
 
     # Set up Cloudflare's DNS
     sudo unlink mnt/etc/resolv.conf | true
-    printf 'nameserver 1.1.1.1\nnameserver 1.0.0.1\n' | sudo tee mnt/etc/resolv.conf > /dev/null
+    printf 'nameserver 1.1.1.1\nnameserver 1.0.0.1\n' | sudo tee mnt/etc/resolv.conf >/dev/null
 }
 
 # Setup iptables
@@ -156,7 +156,7 @@ setup_iptables() {
 setup_sshd() {
     # Authorize our device to login as 'alarm'
     sudo mkdir -p mnt/home/alarm/.ssh
-    echo "$CONFIG_USER_AUTHORIZED_KEYS" > | sudo tee mnt/home/alarm/.ssh/authorized_keys > /dev/null
+    echo "$CONFIG_USER_AUTHORIZED_KEYS" > | sudo tee mnt/home/alarm/.ssh/authorized_keys >/dev/null
     sudo chown -R 1000:1000 mnt/home/alarm/.ssh/
 
     # Uncomment:
@@ -180,10 +180,10 @@ configure() {
     printf '\nConfiguring the system\n'
     
     # Set hostname and hosts
-    printf '%s\n' "$CONFIG_SERVER_HOSTNAME" | sudo tee mnt/etc/hostname > /dev/null
+    printf '%s\n' "$CONFIG_SERVER_HOSTNAME" | sudo tee mnt/etc/hostname >/dev/null
     printf '127.0.0.1\t\tlocalhost\n127.0.1.1\t\t%s.%s\t%s\n%s\t\t%s.%s\t%s\n' \
         "$CONFIG_SERVER_HOSTNAME" "$CONFIG_USER_DOMAIN" "$CONFIG_SERVER_HOSTNAME" "$CONFIG_LAN_IP" "$CONFIG_SERVER_HOSTNAME" "$CONFIG_USER_DOMAIN" "$CONFIG_SERVER_HOSTNAME" \
-        | sudo tee mnt/etc/hosts > /dev/null
+        | sudo tee mnt/etc/hosts >/dev/null
 
     # Set MAKEFLAGS="-j4"
     sudo sed -i 's/#MAKEFLAGS="-j2"/MAKEFLAGS="-j4"/g' mnt/etc/makepkg.conf
@@ -234,7 +234,7 @@ env_replace() {
 
         envsubst "$SUBST_VARS" \
             < "$f" \
-            | sudo tee "$dest_file" > /dev/null
+            | sudo tee "$dest_file" >/dev/null
     done
 
     find docker/ -type f | while read f; do
@@ -242,7 +242,7 @@ env_replace() {
 
         envsubst "$SUBST_VARS" \
             < "$f" \
-            | sudo tee "$dest_file" > /dev/null
+            | sudo tee "$dest_file" >/dev/null
     done
 }
 
