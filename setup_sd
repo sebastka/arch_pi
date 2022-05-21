@@ -53,8 +53,8 @@ load_env() {
     CONFIG_WIREGUAR_GATEWAY="$(echo "$CONFIG_WIREGUARD_SUBNET" | cut -d'.' -f1-3).1"
 
     # Docker: UID/GID (Alarm should be 1000)
-    CONFIG_USER_UID="1001"
-    CONFIG_USER_GID="1001"
+    CONFIG_USER_UID='1001'
+    CONFIG_USER_GID='1001'
 
     set +a
 }
