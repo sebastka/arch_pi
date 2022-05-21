@@ -38,7 +38,7 @@ services:
       DHCP_END: '${CONFIG_PIHOLE_DHCP_END}' # End of the range of IP addresses to hand out by the DHCP server (mandatory if DHCP server is enabled).
       DHCP_ROUTER: '${CONFIG_LAN_GATEWAY}' # Router (gateway) IP address sent by the DHCP server (mandatory if DHCP server is enabled).
       #DHCP_LEASETIME: '24' # DHCP lease time in hours.
-      PIHOLE_DOMAIN: '${CONFIG_USER_DOMAIN}' # Domain name sent by the DHCP server.
+      #PIHOLE_DOMAIN: '${CONFIG_USER_DOMAIN}' # Domain name sent by the DHCP server.
       #DHCP_IPv6: 'false' # Enable DHCP server IPv6 support (SLAAC + RA).
       #DHCP_rapid_commit: 'false' # Enable DHCPv4 rapid commit (fast address assignment).
       # Volumes store your data between container upgrades

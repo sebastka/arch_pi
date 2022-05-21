@@ -31,6 +31,7 @@ main() {
     partition_device
     iso_write
     env_replace
+    setup_users
     setup_network
     setup_iptables
     setup_sshd
@@ -49,7 +50,7 @@ load_env() {
     CONFIG_TRUSTED_NETWORKS="$CONFIG_LAN_NETWORK"
     [ -z "$CONFIG_WIREGUARD_SUBNET" ] || CONFIG_TRUSTED_NETWORKS="$CONFIG_TRUSTED_NETWORKS,$CONFIG_WIREGUARD_SUBNET"
 
-    #WireGuard
+    # WireGuard
     CONFIG_WIREGUAR_GATEWAY="$(echo "$CONFIG_WIREGUARD_SUBNET" | cut -d'.' -f1-3).1"
 
     # Docker: UID/GID (Alarm should be 1000)
@@ -98,9 +99,7 @@ iso_write() {
         return 3
     fi
 
-    printf '\nWriting arch iso to device...\n'
-
-    printf "\nDecompressing...\n"
+    printf '\nWriting arch image to device...\n'
     sudo bsdtar -xpf ArchLinuxARM-rpi-aarch64-latest.tar.gz -C mnt/
 
     printf "\nSyncing...\n"
@@ -108,11 +107,52 @@ iso_write() {
     
     # Fix fstab
     sudo sed -i 's/mmcblk0/mmcblk1/g' mnt/etc/fstab
+}
 
-    # Copy config and install script to root's home folder
-    sudo mkdir mnt/root/arch_pi
-    sudo cp -a "$path/install" "$path/.env" "$path/docker" "$path/root" mnt/root/arch_pi
-    sudo chown -R root:root mnt/root/arch_pi
+# Setup users
+setup_users() {
+    # Create $CONFIG_USER_NAME user
+    printf '%s:x:%s:%s::/home/%s:/bin/bash\n' \
+        "$CONFIG_USER_NAME" "$CONFIG_USER_UID" "$CONFIG_USER_GID" "$CONFIG_USER_NAME" \
+        | sudo tee -a mnt/etc/passwd >/dev/null
+
+    # Create $CONFIG_USER_NAME group
+    printf '%s:x:%s:\n' \
+        "$CONFIG_USER_NAME" "$CONFIG_USER_GID" \
+        | sudo tee -a mnt/etc/group >/dev/null
+
+    # Set new passwords
+    printf "root:%s\nalarm:%s\nsebastian:%s\n" \
+        "$CONFIG_ROOT_PW" "$CONFIG_ALARM_PW" "$CONFIG_USER_PW" \
+        | sudo chpasswd --root mnt
+
+    # Create home dir
+    sudo mkdir "mnt/home/$CONFIG_USER_NAME"
+    sudo cp mnt/etc/skell/.* "mnt/home/$CONFIG_USER_NAME"
+
+    # Add pubkeys
+    sudo mkdir -p "mnt/home/$CONFIG_USER_NAME/.ssh/keys"
+    echo "$CONFIG_USER_AUTHORIZED_KEYS" \
+        | sudo tee "mnt/home/$CONFIG_USER_NAME/.ssh/authorized_keys" >/dev/null
+
+    # Add privkey
+    [ -z "$CONFIG_USER_PRIVKEY" ] \
+        || echo "$CONFIG_USER_PRIVKEY" \
+        | sudo tee "mnt/home/$CONFIG_USER_NAME/.ssh/keys/$CONFIG_USER_NAME@$CONFIG_SERVER_HOSTNAME" >/dev/null
+
+    # Copy config and install script to home dir
+    sudo mkdir "mnt/home/$CONFIG_USER_NAME/arch_pi"
+    sudo cp -a "$path/install" "$path/.env" "$path/root" "mnt/home/$CONFIG_USER_NAME/arch_pi"
+    sudo cp -a "$path/docker" "mnt/home/$CONFIG_USER_NAME"
+
+    # Fetch dotfiles
+    [ -z "$CONFIG_USER_DOTFILES" ] \
+        || { git clone "$CONFIG_USER_DOTFILES" dotfiles && sudo mv dotfiles "mnt/home/$CONFIG_USER_NAME"; }
+
+    # Permissions
+    sudo chown -R "$CONFIG_USER_UID:$CONFIG_USER_GID" "mnt/home/$CONFIG_USER_NAME"
+    sudo find "mnt/home/$CONFIG_USER_NAME/.ssh/" -type d -exec chmod 700 {} \;
+    sudo find "mnt/home/$CONFIG_USER_NAME/.ssh/" -type f -exec chmod 600 {} \;
 }
 
 # Setup Network
@@ -145,7 +185,7 @@ setup_network() {
 # Setup iptables
 setup_iptables() {
     # Fetch iptables config, update it and verify
-    sudo cp mnt/root/arch_pi/root/etc/iptables/iptables.rules mnt/etc/iptables/
+    sudo cp "mnt/home/$CONFIG_USER_NAME/arch_pi/root/etc/iptables/iptables.rules" mnt/etc/iptables/
     sudoedit mnt/etc/iptables/iptables.rules
 
     # Enable
@@ -154,22 +194,18 @@ setup_iptables() {
 
 # Set up sshd
 setup_sshd() {
-    # Authorize our device to login as 'alarm'
-    sudo mkdir -p mnt/home/alarm/.ssh
-    echo "$CONFIG_USER_AUTHORIZED_KEYS" > | sudo tee mnt/home/alarm/.ssh/authorized_keys >/dev/null
-    sudo chown -R 1000:1000 mnt/home/alarm/.ssh/
+    sudo mv mnt/etc/ssh/sshd_config mnt/etc/ssh/sshd_config.bak
 
-    # Uncomment:
-    sudo sed -i '/#StrictModes yes/s/^#//g' mnt/etc/ssh/sshd_config
-    sudo sed -i '/#MaxAuthTries 6/s/^#//g' mnt/etc/ssh/sshd_config
-    sudo sed -i '/#PubkeyAuthentication yes/s/^#//g' mnt/etc/ssh/sshd_config
-    sudo sed -i '/#X11Forwarding no/s/^#//g' mnt/etc/ssh/sshd_config
-
-    # Substitute:
-    sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/g' mnt/etc/ssh/sshd_config
-    sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/g' mnt/etc/ssh/sshd_config
-    sudo sed -i 's/#ClientAliveInterval 0/ClientAliveInterval 60m/g' mnt/etc/ssh/sshd_config
-    sudo sed -i 's/#ClientAliveCountMax 3/ClientAliveCountMax 10/g' mnt/etc/ssh/sshd_config
+    cat mnt/etc/ssh/sshd_config.bak \
+        | sed '/#StrictModes yes/s/^#//g' \
+        | sed '/#MaxAuthTries 6/s/^#//g' \
+        | sed '/#PubkeyAuthentication yes/s/^#//g' \
+        | sed '/#X11Forwarding no/s/^#//g' \
+        | sed 's/#PermitRootLogin prohibit-password/PermitRootLogin no/g' \
+        | sed 's/#PasswordAuthentication yes/PasswordAuthentication no/g' \
+        | sed 's/#ClientAliveInterval 0/ClientAliveInterval 60m/g' \
+        | sed 's/#ClientAliveCountMax 3/ClientAliveCountMax 10/g' \
+        | sudo tee mnt/etc/ssh/sshd_config >/dev/null
 
     # Verify
     sudoedit mnt/etc/ssh/sshd_config
@@ -189,8 +225,8 @@ configure() {
     sudo sed -i 's/#MAKEFLAGS="-j2"/MAKEFLAGS="-j4"/g' mnt/etc/makepkg.conf
 
     # Autodownload updates every a day
-    sudo cp mnt/root/arch_pi/root/etc/systemd/system/update_fetcher.service \
-        mnt/root/arch_pi/root/etc/systemd/system/update_fetcher.timer \
+    sudo cp "mnt/home/$CONFIG_USER_NAME/arch_pi/root/etc/systemd/system/update_fetcher.service" \
+        "mnt/home/$CONFIG_USER_NAME/arch_pi/root/etc/systemd/system/update_fetcher.timer" \
         mnt/etc/systemd/system/
 
     sudo mkdir -p mnt/etc/systemd/system/timers.target.wants/
@@ -229,20 +265,16 @@ env_replace() {
     # Get all vars' name from .env
     SUBST_VARS="$(printenv | sed 's/=.*//' | grep "^$PREFIX" | sed "s/$PREFIX/\$$PREFIX/" | tr '\n' ',')"
 
-    find root/ -type f | while read f; do
-        dest_file="mnt/root/arch_pi/root/$(echo "$f" | cut -d'/' -f2-)"
-
+    find "$path/root" -type f -printf "%P\n" | while read f; do
         envsubst "$SUBST_VARS" \
-            < "$f" \
-            | sudo tee "$dest_file" >/dev/null
+            < "$path/root/$f" \
+            | sudo tee "mnt/home/$CONFIG_USER_NAME/arch_pi/root/$f" >/dev/null
     done
 
-    find docker/ -type f | while read f; do
-        dest_file="mnt/root/arch_pi/docker/$(echo "$f" | cut -d'/' -f2-)"
-
+    find "$path/docker" -type f -printf "%P\n" | while read f; do
         envsubst "$SUBST_VARS" \
-            < "$f" \
-            | sudo tee "$dest_file" >/dev/null
+            < "$path/docker/$f" \
+            | sudo tee "mnt/home/$CONFIG_USER_NAME/docker/$f" >/dev/null
     done
 }
 

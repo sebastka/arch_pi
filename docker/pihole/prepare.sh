@@ -13,4 +13,4 @@ readonly leases="${CONFIG_PIHOLE_DHCP_STATIC_LEASE}"
 mkdir -p "$path/etc-dnsmasq.d"
 echo "$leases" > "$path/etc-dnsmasq.d/04-pihole-static-dhcp.conf"
 
-sudo chmod -R 755 "$path/etc-dnsmasq.d/"
+chmod -R 755 "$path/etc-dnsmasq.d/"

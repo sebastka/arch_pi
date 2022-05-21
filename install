@@ -18,17 +18,11 @@ readonly path="$(dirname `readlink -f "$0"`)"
 main() {
     readonly USAGE="Usage: ./install"
     [ "$#" -eq 0 ] || { err "Error: 0 argument expected, $# received"; err "$USAGE"; return 1; }
-    [ "$(id -u)" -eq 0 ] || { err 'Error: Please run as root'; return 2; }
     [ -f "$path/.env" ] || { err 'Error: Please configure .env'; return 3; }
 
     load_env
-
-    timedatectl set-ntp true
-    locale-gen
-
-    setup_users
+    init
     install_base
-    setup_ssh
     install_wireguard
     install_docker
 
@@ -40,60 +34,45 @@ load_env() {
     set -a; . "$path/.env"; set +a
 }
 
-# Update users and passwords
-setup_users() {
-    printf '\nCreating new user...\n'
-    useradd -m -G wheel -s /bin/bash "$CONFIG_USER_NAME"
-    
-    printf '\nSetting root pw...\n'
-    passwd root
+init() {
+    # If sudo is installed, init() has already been run (as root): continue
+    if command -v sudo >/dev/null; then
+        [ "$(id -u)" -ne 0 ] || { err 'Error: Please DO NOT run as root'; return 2; }
+        return 0
+    else
+        [ "$(id -u)" -eq 0 ] || { err 'Error: Please run as root'; return 2; }
+    fi
 
-    printf '\nSetting alarm pw...\n'
-    passwd alarm
+    printf '\nInitialize...\n'
 
-    printf '\nSetting %s pw...\n' "$CONFIG_USER_NAME"
-    passwd "$CONFIG_USER_NAME"
+    # Locale
+    timedatectl set-ntp true
+    locale-gen
 
-    # Allow members of wheel group to run sudo
+    # Pacman
+    pacman-key --init
+    pacman-key --populate archlinuxarm
+    pacman -Syu --noconfirm
+
+    # Sudo
+    pacman -S sudo
     sed -i '/%wheel ALL=(ALL:ALL) ALL/s/^# //' /etc/sudoers
+    usermod -a -G wheel "$CONFIG_USER_NAME"
+
+    printf '\nLog out and in again\n'
+    exit 0
 }
 
 # Install base system
 install_base() {
     printf '\nInstalling base system...\n'
 
-    # Get keys and update system
-    pacman-key --init
-    pacman-key --populate archlinuxarm
-    pacman -Syu --noconfirm
-
     # Install basic packages
-    pacman -S --noconfirm --needed sudo base-devel btrfs-progs dnsutils git vim wget htop
+    sudo pacman -S --noconfirm --needed base-devel btrfs-progs man-db man-pages dnsutils git vim wget htop
 
     # Install extra packages
-    pacman -S --noconfirm --needed $CONFIG_SYSTEM_EXTRA_PACKAGES
+    sudo pacman -S --noconfirm --needed $CONFIG_SYSTEM_EXTRA_PACKAGES
     aur_install $CONFIG_SYSTEM_EXTRA_PACKAGES_AUR
-}
-
-# Import priv/pubkey
-setup_ssh() {
-    printf '\nImporting SSH keys...\n'
-
-    # Write ssh key pair
-    if [ ! -z "$CONFIG_USER_PRIVKEY" ]; then
-        # Write key
-        mkdir -p "/home/$CONFIG_USER_NAME/.ssh/keys"
-        echo "$CONFIG_USER_PRIVKEY" > "/home/$CONFIG_USER_NAME/.ssh/keys/$CONFIG_USER_NAME@$CONFIG_SERVER_HOSTNAME"
-
-        # Fix permissions
-        find "/home/$CONFIG_USER_NAME/.ssh/" -type d -exec chmod 700 {} \;
-        find "/home/$CONFIG_USER_NAME/.ssh/" -type f -exec chmod 600 {} \;
-    fi
-
-    # Authorize keylogin for new user
-    mkdir -p "/home/$CONFIG_USER_NAME/.ssh"
-    echo "$CONFIG_USER_AUTHORIZED_KEYS" > "/home/$CONFIG_USER_NAME/.ssh/authorized_keys"
-    chown -R "$(id -u $CONFIG_USER_NAME):$(id -g "$CONFIG_USER_NAME")" "/home/$CONFIG_USER_NAME/.ssh/"
 }
 
 install_wireguard() {
@@ -101,30 +80,30 @@ install_wireguard() {
 	## https://elou.world/en/tutorial/wireguard
 	## https://wiki.archlinux.org/title/WireGuard
 
-	pacman -S --needed wireguard-tools qrencode
+	sudo pacman -S --needed wireguard-tools qrencode
 
     # IP forwarding
     printf 'net.ipv4.ip_forward = 1\nnet.ipv4.conf.all.forwarding = 1\nnet.ipv6.conf.all.forwarding = 1\nnet.ipv4.conf.all.src_valid_mark = 1\n' \
-        tee /etc/sysctl.d/30-ipforward.conf > /dev/null
+        sudo tee /etc/sysctl.d/30-ipforward.conf >/dev/null
 
     # Create "server" peer dir
-    mkdir -p "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server" "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients"
-	cd "/etc/wireguard"
+    sudo mkdir -p "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server" "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients"
 
     # Gen "server" peer priv/pub keys
 	wg genkey \
-        | (umask 0077 && tee "$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.private.key") \
-        | wg pubkey > "$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.public.key"
+        | (umask 0077 && sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.private.key") \
+        | wg pubkey \
+        | sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.public.key" >/dev/null
 
     # "Server" peer variables
     srv_ip="$(echo "$CONFIG_WIREGUARD_SUBNET" | cut -d'.' -f1-3).1"
-    srv_priv_key="$(cat "$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.private.key")"
-    srv_pub_key="$(cat "$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.public.key")"
+    srv_priv_key="$(sudo cat "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.private.key")"
+    srv_pub_key="$(sudo cat "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.public.key")"
 
     # Create "server" peer conf
     printf '[Interface]\nAddress = %s\nListenPort = 51820\nPrivateKey = %s\n\n' \
         "$srv_ip" "$srv_priv_key" \
-        > "wg0.conf"
+        | sudo tee /etc/wireguard/wg0.conf >/dev/null
 
     # Create "client" peers
     i=1
@@ -133,55 +112,52 @@ install_wireguard() {
 
         # Gen priv/pub keys + preshared key
         wg genkey \
-            | (umask 0077 && tee "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.private.key") \
-            | wg pubkey > "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.public.key"
-        wg genpsk > "$CONFIG_SERVER_HOSTNAME/clients/$peer_name-$CONFIG_SERVER_HOSTNAME.psk"
+            | (umask 0077 && sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.private.key") \
+            | wg pubkey \
+            | sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.public.key" >/dev/null
+        wg genpsk | sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name-$CONFIG_SERVER_HOSTNAME.psk" >/dev/null
 
         # "Client" peer variables
         client_ip="$(echo "$CONFIG_WIREGUARD_SUBNET" | cut -d'.' -f1-3).$i"
-        client_pub_key="$(cat "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.public.key")"
-        client_priv_key="$(cat "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.private.key")"
-        psk="$(cat "$CONFIG_SERVER_HOSTNAME/clients/$peer_name-$CONFIG_SERVER_HOSTNAME.psk")"
+        client_pub_key="$(sudo cat "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.public.key")"
+        client_priv_key="$(sudo cat "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.private.key")"
+        psk="$(sudo cat "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name-$CONFIG_SERVER_HOSTNAME.psk")"
 
         # Add "client" peer to "server" peer config
 
         printf '[Peer]\n# %s\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s\n\n' \
             "$peer_name" "$client_pub_key" "$psk" "$client_ip" \
-            >> "wg0.conf"
+            | sudo tee -a /etc/wireguard/wg0.conf >/dev/null
 
         # Create peer "client" config
 
         printf '[Interface]\nAddress = %s\nListenPort = 51820\nPrivateKey = %s\nDNS=%s\n\n' \
             "$client_ip" "$client_priv_key" "$CONFIG_LAN_IP" \
-            > "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf"
+            | sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf" >/dev/null
 
         printf '[Peer]\n# %s\nPublicKey = %s\nPresharedKey = %s\nEndpoint = %s:%s\nAllowedIPs = %s,%s\n' \
             "$CONFIG_SERVER_HOSTNAME" "$srv_pub_key" "$psk" "$CONFIG_SERVER_REMOTE_URL" "$CONFIG_WIREGUARD_EXTERNAL_PORT" "$CONFIG_LAN_NETWORK" "$srv_ip" \
-            >> "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf"
+            | sudo tee -a "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf" >/dev/null
 
-        qrencode -t ansiutf8 \
-            -r "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf" \
-            -o "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf.png"
+        sudo qrencode -t ansiutf8 \
+            -r "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf" \
+            -o "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf.png"
     done
 
-    systemctl enable "wg-quick@wg0"
+    sudo systemctl enable "wg-quick@wg0"
 }
 
 # Setup Docker
 install_docker() {
     printf '\nSetting up Docker...\n'
 
-    pacman -S --noconfirm docker docker-compose
-    systemctl enable docker # Reboot is needed before it can start
-
-    cp -a /root/arch_pi/docker/ "/home/$CONFIG_USER_NAME/"
+    sudo pacman -S --noconfirm docker docker-compose
+    sudo systemctl enable docker # Reboot is needed before it can start
 
     # Some containers require an initial setup
     find /home/"$CONFIG_USER_NAME"/docker/*/prepare.sh | while read f; do
         . "$f"
     done
-
-    chown -R "$CONFIG_USER_NAME:$CONFIG_USER_NAME" "/home/$CONFIG_USER_NAME/docker/"
 
     # Terminate
     printf '\nAfter reboot, run "~/docker/update x" to get the x container started.\n'
@@ -189,14 +165,14 @@ install_docker() {
 
 # Install from AUR
 aur_install() {
-    su "$CONFIG_USER_NAME" -c 'mkdir -p /tmp/aur'
+    mkdir /tmp/aur
 
     for package in $@; do
         git clone "https://aur.archlinux.org/$package.git/" "/tmp/aur/$package"
-        chown -R "$CONFIG_USER_NAME:$CONFIG_USER_NAME" /tmp/aur/
+        cd "/tmp/aur/$package"
+        makepkg --noconfirm -s
 
-        su "$CONFIG_USER_NAME" -c "cd '/tmp/aur/$package/' && makepkg --noconfirm -s"
-        pacman --noconfirm -U "/tmp/aur/$package"/*.pkg.tar.xz
+        sudo pacman --noconfirm -U "/tmp/aur/$package"/*.pkg.tar.xz
     done
 
     rm -rf "/tmp/aur"
