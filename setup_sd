@@ -111,7 +111,7 @@ iso_write() {
 
     # Copy config and install script to root's home folder
     sudo mkdir mnt/root/arch_pi
-    sudo cp -a install .env docker root mnt/root/arch_pi
+    sudo cp -a "$path/install" "$path/.env" "$path/docker" "$path/root" mnt/root/arch_pi
     sudo chown -R root:root mnt/root/arch_pi
 }
 
@@ -218,7 +218,7 @@ configure() {
     sudo sed -i "/#$CONFIG_SYSTEM_EXTRA_LOCALE.UTF-8 UTF-8/s/^#//g" mnt/etc/locale.gen
 
     for locale in LC_NUMERIC LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT LC_IDENTIFICATION; do
-        sed -i "s/$locale=en_US.utf8/$locale=$CONFIG_SYSTEM_EXTRA_LOCALE.utf8/" mnt/etc/locale.conf
+        sudo sed -i "s/$locale=en_US.utf8/$locale=$CONFIG_SYSTEM_EXTRA_LOCALE.utf8/" mnt/etc/locale.conf
     done    
 }
 
