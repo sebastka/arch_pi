@@ -69,8 +69,7 @@ partition_device() {
     sudo wipefs --all --force "$dev" >/dev/null
 
     # Repartition and format
-    printf 'o\nn\np\n1\n\n+200M\nt\nc\nn\np\n2\n\n\nw' \
-        | sudo fdisk "$dev" # Sorry \_(˚-˚)_/
+    cat "$path/fdisk.txt" | sudo fdisk "$dev"
     sudo mkfs.vfat "$dev"p1
     sudo mkfs.btrfs -f "$dev"p2
 
