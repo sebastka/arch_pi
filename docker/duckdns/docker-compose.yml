@@ -6,11 +6,11 @@ services:
     container_name: duckdns
     image: ghcr.io/linuxserver/duckdns
     environment:
-      PUID: CONFIG_USER_UID
-      PGID: CONFIG_USER_GID
+      PUID: ${CONFIG_USER_UID}
+      PGID: ${CONFIG_USER_GID}
       TZ: Europe/Oslo
-      SUBDOMAINS: CONFIG_DUCKDNS_USERNAME
-      TOKEN: CONFIG_DUCKDNS_TOKEN
+      SUBDOMAINS: ${CONFIG_DUCKDNS_USERNAME}
+      TOKEN: ${CONFIG_DUCKDNS_TOKEN}
       LOG_FILE: 'true' #optional
     volumes:
       - './etc-duckdns/:/config'

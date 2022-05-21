@@ -1,59 +1,42 @@
-#!/bin/bash
+#!/bin/sh
 set -e
+set -u
 #set -x
 
-#######################################
-#	Remove docker image and recreate
-#
-#	Arguments:
-#		container_name (string): name of the container to recreate
-#	Outputs:
-#		None
-#	Returns:
-#		1 upon error
-#		0 otherwise
-#######################################
-function main() {
-	local readonly USAGE="Usage: update container_name"
+main() {
+    readonly USAGE="Usage: update container_name"
+    [ "$#" -eq 1 ] || { err "Error: one argument expected, ${#} received"; err "$USAGE"; return 1; }
+    [ "$(id -u)" -ne 0 ] || { err 'Do NOT run as root'; return 2; }
 
-	if [[ "${#}" -ne 1 ]]; then
-		err "Error: one argument expected, ${#} received"
-		err "${USAGE}"
-		return 1
-	fi
+    readonly container="$(echo "$1" | sed 's:/*$::')"
 
-	local readonly container="${1}"
+    # Does the compose-file exist?
+    [ -f "$container/docker-compose.yml" ] || { err 'Error: docker-compose not found', return 3; }
+    cd "$container"
 
-	if [ "${EUID}" -ne 0 ]; then
-		err "Please run as root"
-		return 2
-	fi
+	# Since we're removing the container, pihole's DNS serve (127.0.0.1:53) will be down
+	[ "$container" = 'pihole' ] \
+		&& printf 'nameserver 1.1.1.1\nnameserver 1.0.0.1\n' | sudo tee /etc/resolv.conf >/dev/null
 
-	if [[ ! -f "${container}/docker-compose.yml" ]]; then
-		err "Error: docker-compose not found"
-		return 3
-	fi
+    # Stop
+    sudo docker ps | grep "$container" \
+        && sudo docker stop "$container"
 
-	# Since we're removing the container, pihole (127.0.0.1:53) will be down
-	echo "nameserver 1.1.1.1" > /etc/resolv.conf
+    # Remove
+    sudo docker ps -a | grep "$container" \
+        && sudo docker rm "$container"
 
-	[[ ! -z $(docker ps | grep ${container}) ]] && docker stop "${container}"
-	[[ ! -z $(docker ps -a | grep ${container}) ]] && docker rm "${container}"
+    # Update and start
+    sudo docker-compose pull
+    sudo docker-compose up --detach
 
-	pushd "${container}"
-	docker-compose pull
-	docker-compose up --detach
-	popd
-
-	# Set DNS back to the pi
-	echo -e "nameserver 127.0.0.1\noptions trust-ad" > /etc/resolv.conf
-
-	return 0
+	printf 'nameserver 127.0.0.1\noptions trust-ad\n' | sudo tee /etc/resolv.conf >/dev/null
 }
 
-# Print to stderr (from Google)
-function err() {
-        echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: ${*}" >&2
-}
+#######################################
+#   Print error message to stderr
+#   https://google.github.io/styleguide/shellguide.html
+#######################################
+err() { printf "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $*\n" >&2; }
 
-main "${@}"; exit
+main "$@"; exit

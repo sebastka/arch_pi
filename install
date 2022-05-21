@@ -1,338 +1,213 @@
-#!/bin/bash
-set -e
-#set -x
+#!/bin/sh
+set -e      # Abort upon error
+set -u      # Abort upon udefined variable
+#set -x      # Print every command
+
+readonly path="$(dirname `readlink -f "$0"`)"
 
 #######################################
-#	PiHole + OpenVPN + nftables on arch ARMv7
-#	Assumes a wired connection on $CONFIG_LAN_INTERFACE
+#    Arch ARMv7 on RPI4
+#    Assumes a wired connection on $CONFIG_LAN_INTERFACE
 #
-#	Arguments:
-#		auto (string):	Run script without being prompted for anything
-#	Returns:
-#		1 upon error
-#		0 otherwise
+#    Arguments:
+#        None!
+#    Returns:
+#        1 upon error
+#        0 otherwise
 #######################################
-function main() {
-	local readonly USAGE="Usage: install [auto]"
+main() {
+    readonly USAGE="Usage: ./install"
+    [ "$#" -eq 0 ] || { err "Error: 0 argument expected, $# received"; err "$USAGE"; return 1; }
+    [ "$(id -u)" -eq 0 ] || { err 'Error: Please run as root'; return 2; }
+    [ -f "$path/.env" ] || { err 'Error: Please configure .env'; return 3; }
 
-	if [[ "${#}" -gt 1 ]]; then
-		err "Error: zero or one argument required, ${#} received"
-		err "${USAGE}"
-		return 1
-	fi
+    load_env
 
-	if [ "${EUID}" -ne 0 ]; then
-		err "Please run as root"
-		return 2
-	fi
+    timedatectl set-ntp true
+    locale-gen
 
-	if [[ ! -f .env ]]; then
-		err "Could not find .env file"
-		return 3
-	fi
+    setup_users
+    install_base
+    setup_ssh
+    install_wireguard
+    install_docker
 
-	# Load .env
-	set -o allexport && source .env && set +o allexport
-
-	# Run without being prompted for anything?
-	auto="${1}"
-	[[ "${auto}" == "auto" ]] && pacman_arg="--noconfirm" || pacman_arg=""
-
-	# Make sure we are ready
-	cat .env
-	warn	"\n\nBefore continuing, please make sure that:\n" \
-		"\t- The server is set up with a static local IP (${CONFIG_LAN_IP});\n" \
-		"\t- The variables in .env are correct\n"
-
-	# Create new user and change all passwords
-	useradd -m -G wheel -s /bin/bash "${CONFIG_USER_NAME}"
-	echo -e "root:${CONFIG_ROOT_PW}\nalarm:${CONFIG_ALARM_PW}\nsebastian:${CONFIG_USER_PW}" | chpasswd
-
-	# Update locale
-	locale-gen
-
-	# Get keys, update, install base packages and extra packages
-	pacman-key --init
-	pacman-key --populate archlinuxarm
-	pacman -Syu $pacman_arg
-	pacman -S $pacman_arg --needed sudo base-devel btrfs-progs dnsutils git vim wget
-	pacman -S $pacman_arg --needed ${CONFIG_SYSTEM_EXTRA_PACKAGES}
-	install_from_aur ${CONFIG_SYSTEM_EXTRA_PACKAGES_AUR}
-
-	# Allow members of wheel group to run sudo
-	sed -i "s/# %wheel ALL=(ALL) ALL/%wheel ALL=(ALL) ALL/g" /etc/sudoers
-
-	# Install services listed in .env (CONFIG_SYSTEM_SERVICES)
-	for s in $CONFIG_SYSTEM_SERVICES; do
-		eval "install_${s}"
-	done
-
-	warn "\nFinalizing...\n"
-
-	# Write ssh key pair
-	if [[ ! -z "${CONFIG_USER_PRIVKEY}" ]]; then
-		# Write key
-		mkdir -p "/home/${CONFIG_USER_NAME}/.ssh/keys"
-		echo -e "${CONFIG_USER_PRIVKEY}" > "/home/${CONFIG_USER_NAME}/.ssh/keys/${CONFIG_USER_NAME}@${CONFIG_SERVER_HOSTNAME}"
-
-		# Fix permissions
-		chown -R "${CONFIG_USER_NAME}:${CONFIG_USER_NAME}" "/home/${CONFIG_USER_NAME}/.ssh/"
-		chmod -R 700 "/home/${CONFIG_USER_NAME}/.ssh/"
-		chmod 600 "/home/${CONFIG_USER_NAME}/.ssh/keys/${CONFIG_USER_NAME}@${CONFIG_SERVER_HOSTNAME}"
-	fi
-
-	# Run personal commands defined in .env: one as root, one as unprivileged user
-	[[ ! -z "${CONFIG_ROOT_COMMAND}" ]] && eval "${CONFIG_ROOT_COMMAND}"
-	[[ ! -z "${CONFIG_USER_COMMAND}" ]] && su "${CONFIG_USER_NAME}" -c "${CONFIG_USER_COMMAND}"
-
-	echo -e "\nDone. Please reboot"
-
-	return 0
+    printf '\nDone. Please reboot\n'
 }
 
-#######################################
-#       Install from AUR              #
-#######################################
-function install_from_aur() {
-	[[ "${#}" -lt 1 ]] && return 1
-	local readonly packages="${@}"
-
-	for package in ${packages}; do
-		# Remove cache
-		[[ -d "/home/${CONFIG_USER_NAME}/.cache/paru/clone/${package}" ]] && rm -rf "/home/${CONFIG_USER_NAME}/.cache/paru/clone/${package}"
-
-		# Create package
-		su "${CONFIG_USER_NAME}" -c "\
-			mkdir -p /home/${CONFIG_USER_NAME}/.cache/paru/clone/ && \
-			git clone 'https://aur.archlinux.org/${package}.git/' '/home/${CONFIG_USER_NAME}/.cache/paru/clone/${package}/' && \
-			cd '/home/${CONFIG_USER_NAME}/.cache/paru/clone/${package}/' && \
-			makepkg --noconfirm -s \
-		"
-
-		# Install package
-		pacman $pacman_arg -U "$(ls /home/${CONFIG_USER_NAME}/.cache/paru/clone/${package}/*.pkg.tar.xz)"
-	done
-
-	return 0
+# Load env
+load_env() {
+    set -a; . "$path/.env"; set +a
 }
 
-#######################################
-#        Setup OpenVPN                #
-#######################################
-function install_openvpn() {
-	pacman -S $pacman_arg --needed openvpn easy-rsa
+# Update users and passwords
+setup_users() {
+    printf '\nCreating new user...\n'
+    useradd -m -G wheel -s /bin/bash "$CONFIG_USER_NAME"
+    
+    printf '\nSetting root pw...\n'
+    passwd root
 
-	# Define env
-	export EASYRSA=/etc/easy-rsa
-	export EASYRSA_VARS_FILE="${EASYRSA}/vars"
+    printf '\nSetting alarm pw...\n'
+    passwd alarm
 
-	export EASYRSA_REQ_CN="${CONFIG_OPENVPN_COMMON_NAME}"
-	export EASYRSA_PASSIN="pass:${CONFIG_OPENVPN_PASSPHRASE}"
-	export EASYRSA_PASSOUT="${EASYRSA_PASSIN}"
-	export EASYRSA_BATCH="yes"
+    printf '\nSetting %s pw...\n' "$CONFIG_USER_NAME"
+    passwd "$CONFIG_USER_NAME"
 
-	# Set up Easy-rsa vars
-	sed -i '/#set_var EASYRSA_REQ_COUNTRY/a set_var EASYRSA_REQ_COUNTRY     "NO"' "${EASYRSA_VARS_FILE}"
-	sed -i '/#set_var EASYRSA_REQ_PROVINCE/a set_var EASYRSA_REQ_PROVINCE    "Oslo"' "${EASYRSA_VARS_FILE}"
-	sed -i '/#set_var EASYRSA_REQ_CITY/a set_var EASYRSA_REQ_CITY        "Oslo"' "${EASYRSA_VARS_FILE}"
-	sed -i "/#set_var EASYRSA_REQ_EMAIL/a set_var EASYRSA_REQ_EMAIL       \"${CONFIG_USER_EMAIL}\"" "${EASYRSA_VARS_FILE}"
-	sed -i '/#set_var EASYRSA_ALGO/a set_var EASYRSA_ALGO            ec' "${EASYRSA_VARS_FILE}"
-	sed -i '/#set_var EASYRSA_CURVE/a set_var EASYRSA_CURVE           secp521r1' "${EASYRSA_VARS_FILE}"
-	sed -i '/#set_var EASYRSA_DIGEST/a set_var EASYRSA_DIGEST          "sha512"' "${EASYRSA_VARS_FILE}"
-	[[ "${auto}" != "auto" ]] && vim "${EASYRSA_VARS_FILE}"
-
-	mkdir -p "/etc/openvpn/server/${CONFIG_OPENVPN_COMMON_NAME}/"
-
-	# Set up CA, keys and crt
-	openvpn --genkey secret "/etc/openvpn/server/${CONFIG_OPENVPN_COMMON_NAME}/ta.key"
-
-	# Create CA
-	easyrsa init-pki
-	easyrsa build-ca
-	easyrsa gen-req "${CONFIG_OPENVPN_COMMON_NAME}" nopass
-	easyrsa sign-req server "${CONFIG_OPENVPN_COMMON_NAME}"
-	easyrsa gen-crl
-
-	# Copy keys and cert to /etc/openvpn/
-	cp	/etc/easy-rsa/pki/ca.crt \
-		"/etc/easy-rsa/pki/private/${CONFIG_OPENVPN_COMMON_NAME}.key" \
-		"/etc/easy-rsa/pki/issued/${CONFIG_OPENVPN_COMMON_NAME}.crt" \
-		/etc/easy-rsa/pki/crl.pem \
-		"/etc/openvpn/server/${CONFIG_OPENVPN_COMMON_NAME}/"
-
-	# Setup jail
-	mkdir -p "/etc/openvpn/server/${CONFIG_OPENVPN_COMMON_NAME}/jail/tmp/"
-	ln -s ../crl.pem "/etc/openvpn/server/${CONFIG_OPENVPN_COMMON_NAME}/jail/crl.pem"
-
-	# Fetch openvpn config
-	cp /root/root/etc/openvpn/server/server.conf "/etc/openvpn/server/${CONFIG_OPENVPN_COMMON_NAME}.conf"
-	cp /root/root/etc/openvpn/client/template.ovpn /etc/openvpn/client/
-
-	# Fetching vpn and lan config
-	local readonly CONFIG_LAN_NID=$(echo ${CONFIG_LAN_NETWORK} | cut -d'/' -f1)
-	local readonly CONFIG_LAN_MASK=$(cidr2mask ${CONFIG_LAN_NETWORK})
-	local readonly CONFIG_OPENVPN_NID=$(echo ${CONFIG_OPENVPN_SUBNET} | cut -d'/' -f1)
-	local readonly CONFIG_OPENVPN_MASK=$(cidr2mask ${CONFIG_OPENVPN_SUBNET})
-
-	# Update config file with env and check
-	env_replace "/etc/openvpn/server/${CONFIG_OPENVPN_COMMON_NAME}.conf" "/etc/openvpn/client/template.ovpn"
-	[[ "${auto}" != "auto" ]] && vim "/etc/openvpn/server/${CONFIG_OPENVPN_COMMON_NAME}.conf"
-
-	# Enable ip forwarding
-	echo -e "net.ipv4.ip_forward = 1\nnet.ipv4.conf.all.forwarding = 1\nnet.ipv6.conf.all.forwarding = 1\n" > /etc/sysctl.d/30-ipforward.conf
-
-	# Dnsmasq
-	mkdir -p /etc/dnsmasq.d/
-	echo "interface=tun0" > /etc/dnsmasq.d/00-openvpn.conf
-
-	# Permissions
-	mkdir -p /etc/openvpn/revoked/
-	chown -R openvpn:network /etc/openvpn/{server,client,revoked}
-
-	systemctl enable "openvpn-server@${CONFIG_OPENVPN_COMMON_NAME}"
-
-	return 0
+    # Allow members of wheel group to run sudo
+    sed -i '/%wheel ALL=(ALL:ALL) ALL/s/^# //' /etc/sudoers
 }
 
-#######################################
-#        Setup Wireguard              #
-#######################################
-function install_wireguard() {
+# Install base system
+install_base() {
+    printf '\nInstalling base system...\n'
+
+    # Get keys and update system
+    pacman-key --init
+    pacman-key --populate archlinuxarm
+    pacman -Syu --noconfirm
+
+    # Install basic packages
+    pacman -S --noconfirm --needed sudo base-devel btrfs-progs dnsutils git vim wget htop
+
+    # Install extra packages
+    pacman -S --noconfirm --needed $CONFIG_SYSTEM_EXTRA_PACKAGES
+    aur_install $CONFIG_SYSTEM_EXTRA_PACKAGES_AUR
+}
+
+# Import priv/pubkey
+setup_ssh() {
+    printf '\nImporting SSH keys...\n'
+
+    # Write ssh key pair
+    if [ ! -z "$CONFIG_USER_PRIVKEY" ]; then
+        # Write key
+        mkdir -p "/home/$CONFIG_USER_NAME/.ssh/keys"
+        echo "$CONFIG_USER_PRIVKEY" > "/home/$CONFIG_USER_NAME/.ssh/keys/$CONFIG_USER_NAME@$CONFIG_SERVER_HOSTNAME"
+
+        # Fix permissions
+        find "/home/$CONFIG_USER_NAME/.ssh/" -type d -exec chmod 700 {} \;
+        find "/home/$CONFIG_USER_NAME/.ssh/" -type f -exec chmod 600 {} \;
+    fi
+
+    # Authorize keylogin for new user
+    mkdir -p "/home/$CONFIG_USER_NAME/.ssh"
+    echo "$CONFIG_USER_AUTHORIZED_KEYS" > "/home/$CONFIG_USER_NAME/.ssh/authorized_keys"
+    chown -R "$(id -u $CONFIG_USER_NAME):$(id -g "$CONFIG_USER_NAME")" "/home/$CONFIG_USER_NAME/.ssh/"
+}
+
+install_wireguard() {
 	## Using systemd-networkd's native WireGuard support
 	## https://elou.world/en/tutorial/wireguard
 	## https://wiki.archlinux.org/title/WireGuard
 
-	pacman -S $pacman_arg --needed wireguard-tools
-	mkdir -p /etc/wireguard/
+	pacman -S --needed wireguard-tools qrencode
 
-	## Enable IPv4 forwarding (?)
-	#sysctl -w net.ipv4.ip_forward=1
-	#echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.d/99-sysctl.conf
+    # IP forwarding
+    printf 'net.ipv4.ip_forward = 1\nnet.ipv4.conf.all.forwarding = 1\nnet.ipv6.conf.all.forwarding = 1\nnet.ipv4.conf.all.src_valid_mark = 1\n' \
+        tee /etc/sysctl.d/30-ipforward.conf > /dev/null
 
-	## Gen "server" peer key pair
-	pushd /etc/wireguard/
-	umask 137
-	wg genkey | tee hermes.private.key | wg pubkey > hermes.public.key
-	popd
+    # Create "server" peer dir
+    mkdir -p "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server" "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients"
+	cd "/etc/wireguard"
 
-	# Temp config (Ex: 10.8.0)
-	local readonly subnet="$(echo ${CONFIG_WIREGUARD_SUBNET} | cut -d'.' -f1-3)"
+    # Gen "server" peer priv/pub keys
+	wg genkey \
+        | (umask 0077 && tee "$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.private.key") \
+        | wg pubkey > "$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.public.key"
 
-	# Config
-	echo -e "# WireGurard server peer ${CONFIG_SERVER_HOSTNAME} ${subnet}.1 ${CONFIG_SERVER_REMOTE_URL}:${CONFIG_WIREGUARD_EXTERNAL_PORT}\n\n[NetDev]\nName = wg0\nKind = wireguard\nDescription = WireGurard server peer ${CONFIG_SERVER_HOSTNAME} ${subnet}.1 ${CONFIG_WIREGUARD_SERVERURL}\n\n[WireGuard]\nListenPort = $(echo ${CONFIG_WIREGUARD_SERVERURL} | cut -d':' -f2)\nPrivateKeyFile = /etc/wireguard/${CONFIG_SERVER_HOSTNAME}.private.key" > /etc/systemd/network/99-wg0.netdev
-	echo -e "# WireGurard server peer ${CONFIG_SERVER_HOSTNAME} ${subnet}.1 ${CONFIG_SERVER_REMOTE_URL}:${CONFIG_WIREGUARD_EXTERNAL_PORT}\n\n[Match]\nName = wg0\n\n[Network]\nAddress = ${subnet}.1/24\n#DNS = ${CONFIG_WIREGUARD_PEERDNS}\n#DNSDefaultRoute = true\n#Domains = ~.\n\n[Route]\nGateway = ${subnet}.1\nDestination = ${subnet}.0/24\nScope=link" > /etc/systemd/network/99-wg0.network
+    # "Server" peer variables
+    srv_ip="$(echo "$CONFIG_WIREGUARD_SUBNET" | cut -d'.' -f1-3).1"
+    srv_priv_key="$(cat "$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.private.key")"
+    srv_pub_key="$(cat "$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.public.key")"
 
-	## Adjust permissions
-	chown -R root:systemd-network /etc/wireguard/ /etc/systemd/network
-	chmod -R 640 /etc/systemd/network/*
+    # Create "server" peer conf
+    printf '[Interface]\nAddress = %s\nListenPort = 51820\nPrivateKey = %s\n\n' \
+        "$srv_ip" "$srv_priv_key" \
+        > "wg0.conf"
 
-	return 0
+    # Create "client" peers
+    i=1
+    for peer_name in $CONFIG_WIREGUAR_PEERS; do
+        i=$((i+1))
+
+        # Gen priv/pub keys + preshared key
+        wg genkey \
+            | (umask 0077 && tee "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.private.key") \
+            | wg pubkey > "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.public.key"
+        wg genpsk > "$CONFIG_SERVER_HOSTNAME/clients/$peer_name-$CONFIG_SERVER_HOSTNAME.psk"
+
+        # "Client" peer variables
+        client_ip="$(echo "$CONFIG_WIREGUARD_SUBNET" | cut -d'.' -f1-3).$i"
+        client_pub_key="$(cat "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.public.key")"
+        client_priv_key="$(cat "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.private.key")"
+        psk="$(cat "$CONFIG_SERVER_HOSTNAME/clients/$peer_name-$CONFIG_SERVER_HOSTNAME.psk")"
+
+        # Add "client" peer to "server" peer config
+
+        printf '[Peer]\n# %s\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s\n\n' \
+            "$peer_name" "$client_pub_key" "$psk" "$client_ip" \
+            >> "wg0.conf"
+
+        # Create peer "client" config
+
+        printf '[Interface]\nAddress = %s\nListenPort = 51820\nPrivateKey = %s\nDNS=%s\n\n' \
+            "$client_ip" "$client_priv_key" "$CONFIG_LAN_IP" \
+            > "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf"
+
+        printf '[Peer]\n# %s\nPublicKey = %s\nPresharedKey = %s\nEndpoint = %s:%s\nAllowedIPs = %s,%s\n' \
+            "$CONFIG_SERVER_HOSTNAME" "$srv_pub_key" "$psk" "$CONFIG_SERVER_REMOTE_URL" "$CONFIG_WIREGUARD_EXTERNAL_PORT" "$CONFIG_LAN_NETWORK" "$srv_ip" \
+            >> "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf"
+
+        qrencode -t ansiutf8 \
+            -r "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf" \
+            -o "$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf.png"
+    done
+
+    systemctl enable "wg-quick@wg0"
+}
+
+# Setup Docker
+install_docker() {
+    printf '\nSetting up Docker...\n'
+
+    pacman -S --noconfirm docker docker-compose
+    systemctl enable docker # Reboot is needed before it can start
+
+    cp -a /root/arch_pi/docker/ "/home/$CONFIG_USER_NAME/"
+    chown -R "$CONFIG_USER_NAME:$CONFIG_USER_NAME" "/home/$CONFIG_USER_NAME/docker/"
+
+    # Set up static leases for PiHole (if provided)
+    if [ ! -z "$CONFIG_PIHOLE_DHCP_STATIC_LEASE" ]; then
+        mkdir -p "/home/$CONFIG_USER_NAME/docker/pihole/etc-dnsmasq.d"
+        echo "$CONFIG_PIHOLE_DHCP_STATIC_LEASE" > "/home/$CONFIG_USER_NAME/docker/pihole/etc-dnsmasq.d/04-pihole-static-dhcp.conf"
+        sudo chown -R "$CONFIG_USER_NAME:$CONFIG_USER_NAME" "/home/$CONFIG_USER_NAME/docker/pihole/etc-dnsmasq.d/"
+        sudo chmod -R 755 "/home/$CONFIG_USER_NAME/docker/pihole/etc-dnsmasq.d/"
+    fi
+
+    # Terminate
+    printf '\nAfter reboot, run "~/docker/update x" to get the x container started.\n'
+}
+
+# Install from AUR
+aur_install() {
+    su "$CONFIG_USER_NAME" -c 'mkdir -p /tmp/aur'
+
+    for package in $@; do
+        git clone "https://aur.archlinux.org/$package.git/" "/tmp/aur/$package"
+        chown -R "$CONFIG_USER_NAME:$CONFIG_USER_NAME" /tmp/aur/
+
+        su "$CONFIG_USER_NAME" -c "cd '/tmp/aur/$package/' && makepkg --noconfirm -s"
+        pacman --noconfirm -U "/tmp/aur/$package"/*.pkg.tar.xz
+    done
+
+    rm -rf "/tmp/aur"
 }
 
 #######################################
-#        Setup Unbound                #
+#   Print error message to stderr
+#   https://google.github.io/styleguide/shellguide.html
 #######################################
-function install_unbound() {
-	pacman -S $pacman_arg --needed unbound expat
+err() { echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $*" >&2; }
 
-	# Backup old config and fetch ours
-	[[ -f /etc/unbound/unbound.conf ]] && mv /etc/unbound/unbound.conf /etc/unbound/unbound.conf.bak
-	cp /root/root/etc/unbound/unbound.conf /etc/unbound/unbound.conf
-	[[ "${auto}" != "auto" ]] && vim /etc/unbound/unbound.conf
-
-	# Set up service
-	echo -e "[Unit]\nDescription=Update root hints for unbound\nAfter=network.target\n\n[Service]\nExecStart=/usr/bin/curl -o /etc/unbound/root.hints https://www.internic.net/domain/named.cache" > /etc/systemd/system/roothints.service
-	echo -e "[Unit]\nDescription=Run root.hints monthly\n\n[Timer]\nOnCalendar=monthly\nPersistent=true\n\n[Install]\nWantedBy=timers.target" > /etc/systemd/system/roothints.timer
-
-	# Wait until root.hints is fetched and then start unbound
-	systemctl start roothints
-	while [ ! -f /etc/unbound/root.hints ]; do sleep 1; done
-	systemctl enable --now roothints.timer unbound
-
-	return 0
-}
-
-#######################################
-#        Setup Docker                 #
-#######################################
-function install_docker() {
-	pacman -S $pacman_arg docker docker-compose
-	systemctl enable docker # Reboot is needed before it can start
-	
-	cp -a /root/docker/ "/home/${CONFIG_USER_NAME}/"
-	chown -R "${CONFIG_USER_NAME}:${CONFIG_USER_NAME}" "/home/${CONFIG_USER_NAME}/docker/"
-
-	# Extra conf: UID/GID
-	local readonly CONFIG_USER_UID=$(id -u "${CONFIG_USER_NAME}")
-	local readonly CONFIG_USER_GID=$(id -g "${CONFIG_USER_NAME}")
-
-	# Extra conf: trusted networks
-	local CONFIG_TRUSTED_NETWORKS="${CONFIG_LAN_NETWORK}"
-	[[ ! -z "${CONFIG_OPENVPN_SUBNET}" ]] && CONFIG_TRUSTED_NETWORKS="${CONFIG_TRUSTED_NETWORKS},${CONFIG_OPENVPN_SUBNET}"
-	[[ ! -z "${CONFIG_WIREGUARD_SUBNET}" ]] && [[ "${CONFIG_WIREGUARD_SUBNET}" != "${CONFIG_OPENVPN_SUBNET}" ]] && CONFIG_TRUSTED_NETWORKS="${CONFIG_TRUSTED_NETWORKS},${CONFIG_WIREGUARD_SUBNET}"
-
-	# Update config vars in every file in the docker folder
-	for f in $(find /home/${CONFIG_USER_NAME}/docker/ -type f); do
-		env_replace "${f}"
-	done
-
-	# Set up static leases for PiHole (if provided)
-	[[ ! -z "${CONFIG_PIHOLE_DHCP_STATIC_LEASE}" ]] \
-		&& mkdir "/home/${CONFIG_USER_NAME}/docker/pihole/etc-dnsmasq.d/" \
-		&& echo -e "${CONFIG_PIHOLE_DHCP_STATIC_LEASE}" > "/home/${CONFIG_USER_NAME}/docker/pihole/etc-dnsmasq.d/04-pihole-static-dhcp.conf" \
-		&& sudo chown -R "${CONFIG_USER_NAME}:${CONFIG_USER_NAME}" "/home/${CONFIG_USER_NAME}/docker/pihole/etc-dnsmasq.d/" \
-		&& sudo chmod -R 755 "/home/${CONFIG_USER_NAME}/docker/pihole/etc-dnsmasq.d/"
-
-	# Terminate
-	warn "\nAfter reboot, run '~/docker/update x' to get the x container started."
-	
-	return 0
-}
-
-#######################################
-#       Div helpers                   #
-#######################################
-
-# Replace all placeholders in passed files with values in env
-# env_replace my_file.txt my_file2.txt
-function env_replace() {
-	[[ "${#}" -lt 1 ]] && err "Error: at least argument expected, ${#} received" && return 1
-
-	for f in ${*}; do
-		[[ ! -f "${f}" ]] && err "Error: file '${f}' not found" && return 2
-
-		for config_var in "${!CONFIG_@}"; do
-			local readonly escaped=$(printf "%s" "${!config_var}" | sed -e 's/[]\/$*.^[]/\\&/g')
-			sed -i "s/${config_var}/${escaped}/g" "${f}"
-		done
-	done
-
-	return 0
-}
-
-# cidre2mask 192.168.1.0/24
-# Output: 255.255.255.0
-function cidr2mask() {
-	[[ "${#}" -ne 1 ]] && return 1
-	local readonly bits=$(echo "${1}" | cut -d'/' -f2)
-
-	local readonly masks=("0.0.0.0" "128.0.0.0" "192.0.0.0" "224.0.0.0" "240.0.0.0" "248.0.0.0" "252.0.0.0" "254.0.0.0" "255.0.0.0" "255.128.0.0.0" "255.192.0.0.0" "255.224.0.0.0" "255.240.0.0.0" "255.248.0.0.0" "255.252.0.0.0" "255.254.0.0.0" "255.255.0.0.0" "255.255.128.0" "255.255.192.0" "255.255.224.0" "255.255.240.0" "255.255.248.0" "255.255.252.0" "255.255.254.0" "255.255.255.0" "255.255.255.128" "255.255.255.192" "255.255.255.224" "255.255.255.240" "255.255.255.248" "255.255.255.252" "255.255.255.254" "255.255.255.255")
-
-	echo "${masks[$bits]}"
-}
-
-function warn() {
-	echo -e "${*}"
-	echo -n "Press any key to continue or ^C to abort."
-	read -s -n 1 key
-}
-
-# Print to stderr (from Google)
-function err() {
-        echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: ${*}" >&2
-}
-
-# Functions to run with su
-export -f install_from_aur
-
-main "${@}"; exit
+main "$@"; exit

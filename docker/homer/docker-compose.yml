@@ -6,8 +6,8 @@ services:
     container_name: homer
     image: b4bz/homer:latest
     environment:
-      UID: CONFIG_USER_UID
-      GID: CONFIG_USER_GID
+      UID: ${CONFIG_USER_UID}
+      GID: ${CONFIG_USER_GID}
       TZ: Europe/Oslo
     volumes:
       - './logos/:/www/logos/'

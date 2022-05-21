@@ -1,267 +1,264 @@
-#!/bin/bash
-set -e
-#set -x
+#!/bin/sh
+set -e      # Abort upon error
+set -u      # Abort upon udefined variable
+#set -x      # Print every command
+#set -o pipefail # Prevents errors in a pipeline from being masked (not supported by dash yet)
+
+readonly path="$(dirname `readlink -f "$0"`)"
 
 #######################################
-#	Setup SD card with arch for Raspberry Pi 4
-#	https://archlinuxarm.org/platforms/armv8/broadcom/raspberry-pi-4
-#
-#	Arguments:
-#		sd (string): path to SD card
-#	Returns:
-#		1 upon error
-#		0 otherwise
+#   Description:
+#       Setup Arch PI USB installation medium
+#   Usage:
+#       ./setup_usb dev
+#   Arguments:
+#        dev (string): Path to USB device (Ex: /dev/sda)
+#   Returns:
+#       0 upon success
+#       >=1 upon error
 #######################################
-function main() {
-	local readonly USAGE="Usage: setup_sd sd"
+main() {
+    # Check if $USAGE is respected
+    readonly USAGE='Usage: ./setup_usb dev'
+    [ "$#" -eq 1 ] || { err "Error: 1 argument(s) expected, $# received"; err "$USAGE"; return 1; }
+    [ "$(id -u)" -ne 0 ] || { err 'Error: Please do NOT run as root'; return 2; }
+    [ -f "$path/.env" ] || { err 'Error: Please configure .env'; return 3; }
 
-	if [[ "${#}" -ne 1 ]]; then
-		err "Error: one argument required, ${#} received"
-		err "${USAGE}"
-		return 1
-	fi
+    # Parameters
+    readonly dev="$1"
 
-	if [ "${EUID}" -eq 0 ]; then
-		err "Error: Please do NOT run as root"
-		return 2
-	fi
+    load_env
+    partition_device
+    iso_write
+    env_replace
+    setup_network
+    setup_iptables
+    setup_sshd
+    configure
 
-	if [[ ! -f .env ]]; then
-		err "Error: Please configure .env"
-		return 3
-	fi
+    printf '\nDone! Remember to unmount mnt/ and mnt/boot/\n'
+}
 
-	# Load .env
-	set -o allexport && source .env && set +o allexport
-	local readonly SD="${1}"
+# Load env
+load_env() {
+    set -a;
+    
+    . "$path/.env";
 
-	prepare_sd "${SD}"
-	fetch_arch
-	setup_network
-	setup_iptables
-	setup_sshd
-	configure
+    # Trusted networks (for firewall)
+    CONFIG_TRUSTED_NETWORKS="$CONFIG_LAN_NETWORK"
+    [ -z "$CONFIG_WIREGUARD_SUBNET" ] || CONFIG_TRUSTED_NETWORKS="$CONFIG_TRUSTED_NETWORKS,$CONFIG_WIREGUARD_SUBNET"
 
-	# Finish
-	warn "\n\nWill now unmount"
-	sudo umount mnt/boot/ mnt/
-	rmdir mnt
+    #WireGuard
+    CONFIG_WIREGUAR_GATEWAY="$(echo "$CONFIG_WIREGUARD_SUBNET" | cut -d'.' -f1-3).1"
 
-	echo -e "\n\nDone"
+    # Docker: UID/GID (Alarm should be 1000)
+    CONFIG_USER_UID="1001"
+    CONFIG_USER_GID="1001"
 
-	return 0
+    set +a
+}
+
+# Wipe old partitions, repartition and mount
+partition_device() {
+    printf '\nWiping and partitioning device %s...\n' "$dev"
+
+    sudo wipefs --all --force "$dev"p1 >/dev/null || true
+    sudo wipefs --all --force "$dev"p2 >/dev/null || true
+    sudo wipefs --all --force "$dev" >/dev/null
+
+    # Repartition and format
+    printf 'o\nn\np\n1\n\n+200M\nt\nc\nn\np\n2\n\n\nw' \
+        | sudo fdisk "$dev" # Sorry \_(˚-˚)_/
+    sudo mkfs.vfat "$dev"p1
+    sudo mkfs.btrfs -f "$dev"p2
+
+    # Mount
+    mkdir -p mnt
+    sudo mount "$dev"p2 mnt
+
+    sudo mkdir -p mnt/boot
+    sudo mount "$dev"p1 mnt/boot
+}
+
+# Fetch iso, verify and write to device
+iso_write() {
+    printf '\nFetching arch iso...\n'
+
+    # Get iso and checksum
+    readonly iso_url='http://os.archlinuxarm.org/os'
+    readonly iso_name='ArchLinuxARM-rpi-aarch64-latest.tar.gz'
+    [ -f "$iso_name" ] || wget "$iso_url/$iso_name"
+    wget -O "$iso_name.md5" "$iso_url/$iso_name.md5"
+
+    printf '\nVerifying arch iso...\n'
+    # Check md5sum
+    if ! md5sum -c "$iso_name.md5" > /dev/null; then
+        err "Error: checksum failed"
+        return 3
+    fi
+
+    printf '\nWriting arch iso to device...\n'
+
+    printf "\nDecompressing...\n"
+    sudo bsdtar -xpf ArchLinuxARM-rpi-aarch64-latest.tar.gz -C mnt/
+
+    printf "\nSyncing...\n"
+    sync
+    
+    # Fix fstab
+    sudo sed -i 's/mmcblk0/mmcblk1/g' mnt/etc/fstab
+
+    # Copy config and install script to root's home folder
+    sudo mkdir mnt/root/arch_pi
+    sudo cp -a install .env docker root mnt/root/arch_pi
+    sudo chown -R root:root mnt/root/arch_pi
+}
+
+# Setup Network
+setup_network() {
+    printf "\nSetting up the network...\n"
+
+    # .network file
+    readonly cidr="$CONFIG_LAN_IP/$(echo $CONFIG_LAN_NETWORK | cut -d'/' -f2)"
+
+    # Remove conflicting config
+    sudo mkdir -p mnt/etc/systemd/network/bak/
+    sudo mv mnt/etc/systemd/network/*.network mnt/etc/systemd/network/bak/
+
+    # Create config file and check it
+    printf '[Match]\nName=%s\n\n[Network]\nDHCP=no\nAddress=%s\nGateway=%s\n' \
+        "$CONFIG_LAN_INTERFACE" "$cidr" "$CONFIG_LAN_GATEWAY" \
+        | sudo tee "mnt/etc/systemd/network/$CONFIG_LAN_INTERFACE.network" > /dev/null
+
+    sudoedit "mnt/etc/systemd/network/$CONFIG_LAN_INTERFACE.network"
+
+    # Disable systemd-resolved, since it conflicts with dnsmasq on port 53
+    sudo unlink mnt/etc/systemd/system/dbus-org.freedesktop.resolve1.service || true
+    sudo unlink mnt/etc/systemd/system/multi-user.target.wants/systemd-resolved.service || true
+
+    # Set up Cloudflare's DNS
+    sudo unlink mnt/etc/resolv.conf | true
+    printf 'nameserver 1.1.1.1\nnameserver 1.0.0.1\n' | sudo tee mnt/etc/resolv.conf > /dev/null
+}
+
+# Setup iptables
+setup_iptables() {
+    # Fetch iptables config, update it and verify
+    sudo cp mnt/root/arch_pi/root/etc/iptables/iptables.rules mnt/etc/iptables/
+    sudoedit mnt/etc/iptables/iptables.rules
+
+    # Enable
+    sudo ln -sf ../../../../usr/lib/systemd/system/iptables.service mnt/etc/systemd/system/multi-user.target.wants/iptables.service
+}
+
+# Set up sshd
+setup_sshd() {
+    # Authorize our device to login as 'alarm'
+    sudo mkdir -p mnt/home/alarm/.ssh
+    echo "$CONFIG_USER_AUTHORIZED_KEYS" > | sudo tee mnt/home/alarm/.ssh/authorized_keys > /dev/null
+    sudo chown -R 1000:1000 mnt/home/alarm/.ssh/
+
+    # Uncomment:
+    sudo sed -i '/#StrictModes yes/s/^#//g' mnt/etc/ssh/sshd_config
+    sudo sed -i '/#MaxAuthTries 6/s/^#//g' mnt/etc/ssh/sshd_config
+    sudo sed -i '/#PubkeyAuthentication yes/s/^#//g' mnt/etc/ssh/sshd_config
+    sudo sed -i '/#X11Forwarding no/s/^#//g' mnt/etc/ssh/sshd_config
+
+    # Substitute:
+    sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/g' mnt/etc/ssh/sshd_config
+    sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/g' mnt/etc/ssh/sshd_config
+    sudo sed -i 's/#ClientAliveInterval 0/ClientAliveInterval 60m/g' mnt/etc/ssh/sshd_config
+    sudo sed -i 's/#ClientAliveCountMax 3/ClientAliveCountMax 10/g' mnt/etc/ssh/sshd_config
+
+    # Verify
+    sudoedit mnt/etc/ssh/sshd_config
+}
+
+# Configure
+configure() {
+    printf '\nConfiguring the system\n'
+    
+    # Set hostname and hosts
+    printf '%s\n' "$CONFIG_SERVER_HOSTNAME" | sudo tee mnt/etc/hostname > /dev/null
+    printf '127.0.0.1\t\tlocalhost\n127.0.1.1\t\t%s.%s\t%s\n%s\t\t%s.%s\t%s\n' \
+        "$CONFIG_SERVER_HOSTNAME" "$CONFIG_USER_DOMAIN" "$CONFIG_SERVER_HOSTNAME" "$CONFIG_LAN_IP" "$CONFIG_SERVER_HOSTNAME" "$CONFIG_USER_DOMAIN" "$CONFIG_SERVER_HOSTNAME" \
+        | sudo tee mnt/etc/hosts > /dev/null
+
+    # Set MAKEFLAGS="-j4"
+    sudo sed -i 's/#MAKEFLAGS="-j2"/MAKEFLAGS="-j4"/g' mnt/etc/makepkg.conf
+
+    # Autodownload updates every a day
+    sudo cp mnt/root/arch_pi/root/etc/systemd/system/update_fetcher.service \
+        mnt/root/arch_pi/root/etc/systemd/system/update_fetcher.timer \
+        mnt/etc/systemd/system/
+
+    sudo mkdir -p mnt/etc/systemd/system/timers.target.wants/
+    sudo ln -sf ../update_fetcher.timer \
+        mnt/etc/systemd/system/timers.target.wants/update_fetcher.timer
+
+    # Region and time
+    printf 'KEYMAP=%s\n' "$CONFIG_SYSTEM_KEYMAP" | sudo tee mnt/etc/vconsole.conf >/dev/null
+    sudo ln -sf "/usr/share/zoneinfo/$CONFIG_SYSTEM_REGION" mnt/etc/localtime
+
+    # Enable default locale
+    sudo sed -i '/#en_US.UTF-8 UTF-8/s/^#//g' mnt/etc/locale.gen
+
+    # Setup locale.conf
+    printf '' | sudo tee mnt/etc/locale.conf >/dev/null
+    for locale in LANGUAGE LANG LC_CTYPE LC_NUMERIC LC_TIME LC_MONETARY LC_MESSAGES LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT LC_IDENTIFICATION; do
+        printf '%s=en_US.utf8\n' "$locale" | sudo tee -a mnt/etc/locale.conf >/dev/null
+    done
+    printf 'LC_COLLATE=C\n' | sudo tee -a mnt/etc/locale.conf >/dev/null
+
+    # Continue if an alternative locale is provided
+    [ ! -z "$CONFIG_SYSTEM_EXTRA_LOCALE" ] || return 0
+
+    # Enable extra locale
+    sudo sed -i "/#$CONFIG_SYSTEM_EXTRA_LOCALE.UTF-8 UTF-8/s/^#//g" mnt/etc/locale.gen
+
+    for locale in LC_NUMERIC LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT LC_IDENTIFICATION; do
+        sed -i "s/$locale=en_US.utf8/$locale=$CONFIG_SYSTEM_EXTRA_LOCALE.utf8/" mnt/etc/locale.conf
+    done    
+}
+
+# Replace all placeholders
+env_replace() {
+    printf '\nSubstituting variables\n'
+
+    # Get all vars' name from .env
+    SUBST_VARS="$(printenv | sed 's/=.*//' | grep "^$PREFIX" | sed "s/$PREFIX/\$$PREFIX/" | tr '\n' ',')"
+
+    find root/ -type f | while read f; do
+        dest_file="mnt/root/arch_pi/root/$(echo "$f" | cut -d'/' -f2-)"
+
+        envsubst "$SUBST_VARS" \
+            < "$f" \
+            | sudo tee "$dest_file" > /dev/null
+    done
+
+    find docker/ -type f | while read f; do
+        dest_file="mnt/root/arch_pi/docker/$(echo "$f" | cut -d'/' -f2-)"
+
+        envsubst "$SUBST_VARS" \
+            < "$f" \
+            | sudo tee "$dest_file" > /dev/null
+    done
+}
+
+# $ cidre2mask 192.168.1.0/24
+# 255.255.255.0
+cidr2mask() {
+    readonly bits="$(echo "$1" | cut -d'/' -f2)"
+      readonly masks='0.0.0.0\n128.0.0.0\n192.0.0.0\n224.0.0.0\n240.0.0.0\n248.0.0.0\n252.0.0.0\n254.0.0.0\n255.0.0.0\n255.128.0.0.0\n255.192.0.0.0\n255.224.0.0.0\n255.240.0.0.0\n255.248.0.0.0\n255.252.0.0.0\n255.254.0.0.0\n255.255.0.0.0\n255.255.128.0\n255.255.192.0\n255.255.224.0\n255.255.240.0\n255.255.248.0\n255.255.252.0\n255.255.254.0\n255.255.255.0\n255.255.255.128\n255.255.255.192\n255.255.255.224\n255.255.255.240\n255.255.255.248\n255.255.255.252\n255.255.255.254\n255.255.255.255\n'
+
+    printf "$masks" | sed -n "$(expr "$bits" + 1)"p
 }
 
 #######################################
-#            Prepare SD               #
+#   Print error message to stderr
+#   https://google.github.io/styleguide/shellguide.html
 #######################################
-function prepare_sd() {
-	[[ "${#}" -ne 1 ]] && return 1
-	local readonly SD="${1}"
+err() { echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $*" >&2; }
 
-	# Checking if $SD exists and ask for confirmation
-	[[ ! -e "${SD}" ]] && echo "The device ${SD} does not exist. Aborting." && return 1
-	warn "The following device wil be wiped. Continue? ${SD}"
-
-	# Repartition and format
-	#sudo sfdisk "${SD}" < part.layout # Create layout file: sudo sfdisk -d /dev/mmcblk0 > file
-	sudo bash -c "echo -e \"o\nn\np\n1\n\n+200M\nY\nt\nc\nn\np\n2\n\n\nY\nw\" | fdisk ${SD}" # Sorry \_(˚-˚)_/
-	sudo mkfs.vfat "${SD}p1"
-	sudo mkfs.btrfs -f "${SD}p2"
-
-	# Mount
-	mkdir -p mnt/ && sudo mount "${SD}p2" mnt/
-	sudo mkdir -p mnt/boot && sudo mount "${SD}p1" mnt/boot/
-
-	return 0
-}
-
-#######################################
-#   Fetching and copying arch to SD   #
-#######################################
-function fetch_arch() {
-	warn "Fetching arch and copying to SD..."
-
-	# AArch64 (ARMv8)
-	if [[ ! -f ArchLinuxARM-rpi-aarch64-latest.tar.gz ]]; then
-		echo -e "\nDownloading ArchLinuxARM-rpi-aarch64-latest.tar.gz"
-		wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz
-		wget http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz.md5
-
-		# Check integrity
-		if ! md5sum --check ArchLinuxARM-rpi-aarch64-latest.tar.gz.md5 &>/dev/null; then
-			rm ArchLinuxARM-rpi-aarch64-latest.tar.gz
-			rm ArchLinuxARM-rpi-aarch64-latest.tar.gz.md5
-
-			err "Error: checksum failed"
-			return 4
-		fi
-
-		rm ArchLinuxARM-rpi-aarch64-latest.tar.gz.md5
-	fi
-
-	echo -e "\nDecompressing..."
-	sudo bsdtar -xpf ArchLinuxARM-rpi-aarch64-latest.tar.gz -C mnt
-	
-	# Fix fstab
-	sudo sed -i 's/mmcblk0/mmcblk1/g' mnt/etc/fstab
-
-	echo -e "Syncing..."
-	sync
-
-	# Copy config and install script to root's home folder
-	sudo cp -a install .env docker/ root/ mnt/root/
-	sudo chown -R root:root mnt/root/install mnt/root/.env mnt/root/docker/ mnt/root/root/
-
-	return 0
-}
-
-#######################################
-#          Setup Network              #
-#######################################
-function setup_network() {
-	warn "\nSetting up the network..."
-
-	# If wireless
-	if [[ ! -z "${CONFIG_LAN_WIFI_SSID}" ]]; then
-		echo -e "\n\nSetting up WiFi..."
-
-		sudo mkdir -p mnt/etc/wpa_supplicant/
-		sudo bash -c "wpa_passphrase "${CONFIG_LAN_WIFI_SSID}" "${CONFIG_LAN_WIFI_PASSPHRASE}" > mnt/etc/wpa_supplicant/wpa_supplicant-${CONFIG_LAN_INTERFACE}.conf"
-
-		# sudo systemctl enable wpa_supplicant@wlan0
-		sudo ln -s ../../../../usr/lib/systemd/system/wpa_supplicant@.service "mnt/etc/systemd/system/multi-user.target.wants/wpa_supplicant@${CONFIG_LAN_INTERFACE}.service"
-	fi
-
-	# .network file
-	local readonly cidr="${CONFIG_LAN_IP}/$(echo $CONFIG_LAN_NETWORK | cut -d'/' -f2)"
-	local readonly nconfig="[Match]\nName=${CONFIG_LAN_INTERFACE}\n\n[Network]\nDHCP=no\nAddress=${cidr}\nGateway=${CONFIG_LAN_GATEWAY}"
-
-	# Remove conflicting config
-	sudo mkdir -p mnt/etc/systemd/network/bak/
-	sudo mv mnt/etc/systemd/network/*.network mnt/etc/systemd/network/bak/
-
-	# Create config file and check it
-	sudo bash -c "echo -e \"${nconfig}\" > mnt/etc/systemd/network/${CONFIG_LAN_INTERFACE}.network"
-	sudo vim "mnt/etc/systemd/network/${CONFIG_LAN_INTERFACE}.network"
-
-	# Disable systemd-resolved, since it conflicts with dnsmasq on port 53
-	[[ -f mnt/etc/systemd/system/dbus-org.freedesktop.resolve1.service ]] && sudo rm mnt/etc/systemd/system/dbus-org.freedesktop.resolve1.service
-	[[ -f mnt/etc/systemd/system/multi-user.target.wants/systemd-resolved.service ]] && sudo rm mnt/etc/systemd/system/multi-user.target.wants/systemd-resolved.service
-
-	# Set up Cloudflare's DNS
-	sudo bash -c "unlink mnt/etc/resolv.conf && echo -e \"nameserver 1.1.1.1\nnameserver 1.0.0.1\" > mnt/etc/resolv.conf"
-
-	return 0
-}
-
-#######################################
-#        Setup iptables               #
-#######################################
-function setup_iptables() {
-	local CONFIG_TRUSTED_NETWORKS="${CONFIG_LAN_NETWORK}"
-	[[ ! -z "${CONFIG_OPENVPN_SUBNET}" ]] && CONFIG_TRUSTED_NETWORKS="${CONFIG_TRUSTED_NETWORKS},${CONFIG_OPENVPN_SUBNET}"
-	[[ ! -z "${CONFIG_WIREGUARD_SUBNET}" ]] && [[ "${CONFIG_OPENVPN_SUBNET}" != "${CONFIG_WIREGUARD_SUBNET}" ]] && CONFIG_TRUSTED_NETWORKS="${CONFIG_TRUSTED_NETWORKS},${CONFIG_WIREGUARD_SUBNET}"
-
-	# Fetch ssh config, update it and check
-	sudo cp root/etc/iptables/iptables.rules mnt/etc/iptables/
-	env_replace mnt/etc/iptables/iptables.rules
-	sudo vim mnt/etc/iptables/iptables.rules
-
-	# Enable
-	sudo ln -s ../../../../usr/lib/systemd/system/iptables.service mnt/etc/systemd/system/multi-user.target.wants/iptables.service
-
-	return 0
-}
-
-#######################################
-#         Setup sshd                  #
-#######################################
-function setup_sshd() {
-	# Authorize our device to login as 'alarm'
-	sudo mkdir -p mnt/home/alarm/.ssh/
-	echo -e "${CONFIG_ALARM_AUTHORIZED_KEY}" | sudo tee mnt/home/alarm/.ssh/authorized_keys
-	sudo chown -R 1000:1000 mnt/home/alarm/.ssh/
-
-	# Uncomment:
-	sudo sed -i '/#StrictModes yes/s/^#//g' mnt/etc/ssh/sshd_config
-	sudo sed -i '/#MaxAuthTries 6/s/^#//g' mnt/etc/ssh/sshd_config
-	sudo sed -i '/#PubkeyAuthentication yes/s/^#//g' mnt/etc/ssh/sshd_config
-	sudo sed -i '/#X11Forwarding no/s/^#//g' mnt/etc/ssh/sshd_config
-
-	# Comment:
-	sudo sed -i '/^Subsystem/s/^/#/g' mnt/etc/ssh/sshd_config
-
-	# Substitute:
-	sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/g' mnt/etc/ssh/sshd_config
-	sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/g' mnt/etc/ssh/sshd_config
-	sudo sed -i 's/#ClientAliveInterval 0/ClientAliveInterval 60m/g' mnt/etc/ssh/sshd_config
-	sudo sed -i 's/#ClientAliveCountMax 3/ClientAliveCountMax 10/g' mnt/etc/ssh/sshd_config
-
-	# Check
-	sudo vim mnt/etc/ssh/sshd_config
-
-	return 0
-}
-
-#######################################
-#             Configure               #
-#######################################
-function configure() {
-	warn "\n\nConfiguring the system"
-	
-	# Set hostname and hosts
-	sudo bash -c "echo \"${CONFIG_SERVER_HOSTNAME}\" > mnt/etc/hostname"
-	sudo bash -c "echo -e \"127.0.0.1\t\tlocalhost\n127.0.1.1\t\t${CONFIG_SERVER_HOSTNAME}.${CONFIG_USER_DOMAIN}\t${CONFIG_SERVER_HOSTNAME}\n${CONFIG_LAN_IP}\t\t${CONFIG_SERVER_HOSTNAME}.${CONFIG_USER_DOMAIN}\t${CONFIG_SERVER_HOSTNAME}\n\" > mnt/etc/hosts"
-
-	# Setup locale.gen and global locale.conf
-	sudo sed -i '/#en_US.UTF-8 UTF-8/s/^#//g' mnt/etc/locale.gen
-	[[ ! -z "${CONFIG_SYSTEM_EXTRA_LOCALE}" ]] && sudo sed -i "/#${CONFIG_SYSTEM_EXTRA_LOCALE} UTF-8/s/^#//g" mnt/etc/locale.gen
-
-	sudo cp root/etc/locale.conf mnt/etc/
-	env_replace mnt/etc/locale.conf
-
-	# Set MAKEFLAGS="-j4"
-	sudo sed -i '/#MAKEFLAGS="-j2"/MAKEFLAGS="-j4"/g' mnt/etc/makepkg.conf
-
-	# Autodownload updates every a day
-	sudo cp root/etc/systemd/system/update_fetcher.* mnt/etc/systemd/system/
-	sudo mkdir -p mnt/etc/systemd/system/timers.target.wants/
-	sudo ln -s ../update_fetcher.timer mnt/etc/systemd/system/timers.target.wants/update_fetcher.timer
-
-	return 0
-}
-
-#######################################
-#       Div helpers                   #
-#######################################
-
-# Replace all placeholders in passed files with values in env
-# env_replace my_file.txt my_file2.txt
-function env_replace() {
-	[[ "${#}" -lt 1 ]] && err "Error: at least argument expected, ${#} received" && return 1
-
-	for f in ${*}; do
-		[[ ! -f "${f}" ]] && err "Error: file '${f}' not found" && return 2
-
-		for config_var in "${!CONFIG_@}"; do
-			local readonly escaped=$(printf "%s" "${!config_var}"  | sed -e 's/[]\/$*.^[]/\\&/g')
-			sudo sed -i "s/${config_var}/${escaped}/g" "${f}"
-		done
-	done
-
-	return 0
-}
-
-function warn() {
-	echo -e "${*}"
-	echo -n "Press any key to continue or ^C to abort."
-	read -s -n 1 key
-}
-
-function err() {
-	echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: ${*}" >&2
-	return 0
-}
-
-main "${@}"; exit
+main "$@"; exit

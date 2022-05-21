@@ -7,7 +7,7 @@ services:
     image: portainer/portainer-ce:latest
     environment:
       TZ: Europe/Oslo
-    command: --admin-password 'CONFIG_PORTAINER_ADMIN_PW'
+    command: --admin-password '${CONFIG_PORTAINER_ADMIN_PW}'
     volumes:
       - './portainer_data/:/data'
       - '../:/app/data/custom/'
