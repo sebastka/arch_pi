@@ -1,6 +1,8 @@
 # Install script for Arch on ARMv8 (aarch64)
 
-Set up Arch Linux (ARMv8) with VPN server, Unbound and Docker. 
+Set up Arch Linux (ARMv8) with WireGuard VPN server and Docker (homer dashboard, pihole, portainer...). 
+
+Arch updates are downloaded automatically, but have to be installed manually.
 
 ## Usage
 
