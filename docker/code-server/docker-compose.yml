@@ -8,7 +8,7 @@ services:
     environment:
       PUID: ${CONFIG_USER_UID}
       PGID: ${CONFIG_USER_GID}
-      TZ: Europe/Oslo
+      TZ: ${CONFIG_SYSTEM_REGION}
       PASSWORD: ${CONFIG_CODESERVER_PASSWORD} #optional
       #HASHED_PASSWORD: #optional
       #SUDO_PASSWORD: password #optional

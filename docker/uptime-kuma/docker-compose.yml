@@ -6,7 +6,7 @@ services:
     container_name: uptime-kuma
     image: louislam/uptime-kuma:1
     environment:
-      TZ: Europe/Oslo
+      TZ: ${CONFIG_SYSTEM_REGION}
     volumes:
       - './etc-uptimekuma/:/app/data'
     ports:

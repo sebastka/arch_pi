@@ -57,9 +57,8 @@ init() {
     # Sudo
     pacman -S sudo
     sed -i '/%wheel ALL=(ALL:ALL) ALL/s/^# //' /etc/sudoers
-    usermod -a -G wheel "$CONFIG_USER_NAME"
 
-    printf '\nLog out and in again\n'
+    printf '\nRun again as unprivileged user\n'
     exit 0
 }
 
@@ -68,7 +67,7 @@ install_base() {
     printf '\nInstalling base system...\n'
 
     # Install basic packages
-    sudo pacman -S --noconfirm --needed base-devel btrfs-progs man-db man-pages dnsutils git vim wget htop
+    sudo pacman -S --noconfirm --needed base-devel btrfs-progs man-db man-pages dnsutils git vim wget htop dhcp
 
     # Install extra packages
     sudo pacman -S --noconfirm --needed $CONFIG_SYSTEM_EXTRA_PACKAGES
@@ -80,11 +79,11 @@ install_wireguard() {
 	## https://elou.world/en/tutorial/wireguard
 	## https://wiki.archlinux.org/title/WireGuard
 
-	sudo pacman -S --needed wireguard-tools qrencode
+	sudo pacman -S --noconfirm --needed wireguard-tools qrencode
 
     # IP forwarding
     printf 'net.ipv4.ip_forward = 1\nnet.ipv4.conf.all.forwarding = 1\nnet.ipv6.conf.all.forwarding = 1\nnet.ipv4.conf.all.src_valid_mark = 1\n' \
-        sudo tee /etc/sysctl.d/30-ipforward.conf >/dev/null
+        | sudo tee /etc/sysctl.d/30-ipforward.conf >/dev/null
 
     # Create "server" peer dir
     sudo mkdir -p "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server" "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients"

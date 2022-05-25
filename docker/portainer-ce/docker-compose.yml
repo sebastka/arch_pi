@@ -6,7 +6,7 @@ services:
     container_name: portainer-ce
     image: portainer/portainer-ce:latest
     environment:
-      TZ: Europe/Oslo
+      TZ: ${CONFIG_SYSTEM_REGION}
     command: --admin-password '${CONFIG_PORTAINER_ADMIN_PW}'
     volumes:
       - './portainer_data/:/data'

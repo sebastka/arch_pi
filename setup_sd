@@ -2,7 +2,6 @@
 set -e      # Abort upon error
 set -u      # Abort upon udefined variable
 #set -x      # Print every command
-#set -o pipefail # Prevents errors in a pipeline from being masked (not supported by dash yet)
 
 readonly path="$(dirname `readlink -f "$0"`)"
 
@@ -30,9 +29,10 @@ main() {
     load_env
     partition_device
     iso_write
-    env_replace
     setup_users
+    env_replace
     setup_network
+    setup_dhcp
     setup_iptables
     setup_sshd
     configure
@@ -46,16 +46,16 @@ load_env() {
     
     . "$path/.env"
 
-    # Trusted networks (for firewall)
-    CONFIG_TRUSTED_NETWORKS="$CONFIG_LAN_NETWORK"
-    [ -z "$CONFIG_WIREGUARD_SUBNET" ] || CONFIG_TRUSTED_NETWORKS="$CONFIG_TRUSTED_NETWORKS,$CONFIG_WIREGUARD_SUBNET"
+    # DHCP
+    CONFIG_DHCP_NID="$(echo "$CONFIG_DHCP_SUBNET" | cut -d'/' -f1)"
+    CONFIG_DHCP_MASK="$(cidr2mask "$CONFIG_DHCP_SUBNET")"
 
     # WireGuard
     CONFIG_WIREGUAR_GATEWAY="$(echo "$CONFIG_WIREGUARD_SUBNET" | cut -d'.' -f1-3).1"
 
-    # Docker: UID/GID (Alarm should be 1000)
-    CONFIG_USER_UID='1001'
-    CONFIG_USER_GID='1001'
+    # Docker: UID/GID
+    CONFIG_USER_UID='1000'
+    CONFIG_USER_GID='1000'
 
     set +a
 }
@@ -70,9 +70,9 @@ partition_device() {
     sudo wipefs --all --force "$dev" >/dev/null
 
     # Repartition and format
-    cat "$path/fdisk.txt" | sudo fdisk "$dev"
-    sudo mkfs.vfat "$dev"p1
-    sudo mkfs.btrfs -f "$dev"p2
+    cat "$path/fdisk.txt" | sudo fdisk "$dev" >/dev/null
+    sudo mkfs.vfat "$dev"p1 >/dev/null
+    sudo mkfs.btrfs -f "$dev"p2 >/dev/null
 
     # Mount
     mkdir -p mnt
@@ -89,8 +89,8 @@ iso_write() {
     # Get iso and checksum
     readonly iso_url='http://os.archlinuxarm.org/os'
     readonly iso_name='ArchLinuxARM-rpi-aarch64-latest.tar.gz'
-    [ -f "$iso_name" ] || wget "$iso_url/$iso_name"
-    wget -O "$iso_name.md5" "$iso_url/$iso_name.md5"
+    [ -f "$iso_name" ] || wget --quiet "$iso_url/$iso_name"
+    wget --quiet -O "$iso_name.md5" "$iso_url/$iso_name.md5"
 
     printf '\nVerifying arch iso...\n'
     # Check md5sum
@@ -111,24 +111,21 @@ iso_write() {
 
 # Setup users
 setup_users() {
-    # Create $CONFIG_USER_NAME user
-    printf '%s:x:%s:%s::/home/%s:/bin/bash\n' \
-        "$CONFIG_USER_NAME" "$CONFIG_USER_UID" "$CONFIG_USER_GID" "$CONFIG_USER_NAME" \
-        | sudo tee -a mnt/etc/passwd >/dev/null
+    # Rename alarm to $CONFIG_USER_NAME
+    for f in passwd group shadow gshadow; do
+        # Backup
+        sudo cp "mnt/etc/$f" "mnt/etc/$f-"
 
-    # Create $CONFIG_USER_NAME group
-    printf '%s:x:%s:\n' \
-        "$CONFIG_USER_NAME" "$CONFIG_USER_GID" \
-        | sudo tee -a mnt/etc/group >/dev/null
+        # Write file
+        sudo sed -i "s/alarm/$CONFIG_USER_NAME/g" "mnt/etc/$f"
+    done
 
-    # Set new passwords
-    printf "root:%s\nalarm:%s\nsebastian:%s\n" \
-        "$CONFIG_ROOT_PW" "$CONFIG_ALARM_PW" "$CONFIG_USER_PW" \
-        | sudo chpasswd --root mnt
+    # Force root and user to change pw
+    sudo sed -i '1 s/:[0-9]*:::/:0:::/' mnt/etc/shadow
+    sudo sed -i '$ s/:[0-9]*:0:99999:/:0:0:99999:/' mnt/etc/shadow
 
-    # Create home dir
-    sudo mkdir "mnt/home/$CONFIG_USER_NAME"
-    sudo cp mnt/etc/skell/.* "mnt/home/$CONFIG_USER_NAME"
+    # Move home dir
+    sudo mv mnt/home/alarm "mnt/home/$CONFIG_USER_NAME"
 
     # Add pubkeys
     sudo mkdir -p "mnt/home/$CONFIG_USER_NAME/.ssh/keys"
@@ -182,6 +179,30 @@ setup_network() {
     printf 'nameserver 1.1.1.1\nnameserver 1.0.0.1\n' | sudo tee mnt/etc/resolv.conf >/dev/null
 }
 
+setup_dhcp() {
+    sudo mv mnt/etc/dhcpd.conf mnt/etc/dhcpd.conf.bak
+
+    printf '%s\n' "$CONFIG_DHCP_SERVICELESS_SUBNETS" | tr -s ',' '\n' | while read network; do
+
+        nid="$(echo "$network" | cut -d'/' -f1)"
+        mask="$(cidr2mask "$network")"
+
+        printf '# %s\nsubnet %s netmask %s {\n}\n\n' \
+            "$network" "$nid" "$mask"
+    done | sudo tee -a "mnt/home/$CONFIG_USER_NAME/arch_pi/root/etc/dhcpd.conf" >/dev/null
+
+    printf "$CONFIG_DHCP_LEASES" \
+        | sed 's/,/ /g' \
+        | while read mac ip hostname; do
+        printf 'host %s {\n  hardware ethernet %s;\n  fixed-address %s;\n  option host-name "%s";\n}\n\n' \
+            "$hostname" "$mac" "$ip" "$hostname"
+    done | sudo tee -a "mnt/home/$CONFIG_USER_NAME/arch_pi/root/etc/dhcpd.conf" >/dev/null
+
+    # Copy config and enable
+    sudo cp "mnt/home/$CONFIG_USER_NAME/arch_pi/root/etc/dhcpd.conf" mnt/etc/
+    sudo ln -sf ../../../../usr/lib/systemd/system/dhcpd4.service mnt/etc/systemd/system/multi-user.target.wants/dhcpd4.service
+}
+
 # Setup iptables
 setup_iptables() {
     # Fetch iptables config, update it and verify
@@ -217,8 +238,8 @@ configure() {
     
     # Set hostname and hosts
     printf '%s\n' "$CONFIG_SERVER_HOSTNAME" | sudo tee mnt/etc/hostname >/dev/null
-    printf '127.0.0.1\t\tlocalhost\n127.0.1.1\t\t%s.%s\t%s\n%s\t\t%s.%s\t%s\n' \
-        "$CONFIG_SERVER_HOSTNAME" "$CONFIG_USER_DOMAIN" "$CONFIG_SERVER_HOSTNAME" "$CONFIG_LAN_IP" "$CONFIG_SERVER_HOSTNAME" "$CONFIG_USER_DOMAIN" "$CONFIG_SERVER_HOSTNAME" \
+    printf '127.0.0.1\t\tlocalhost\n127.0.1.1\t\t%s\n' \
+        "$CONFIG_SERVER_HOSTNAME" \
         | sudo tee mnt/etc/hosts >/dev/null
 
     # Set MAKEFLAGS="-j4"
@@ -281,10 +302,10 @@ env_replace() {
 # $ cidre2mask 192.168.1.0/24
 # 255.255.255.0
 cidr2mask() {
-    readonly bits="$(echo "$1" | cut -d'/' -f2)"
-    readonly masks='0.0.0.0\n128.0.0.0\n192.0.0.0\n224.0.0.0\n240.0.0.0\n248.0.0.0\n252.0.0.0\n254.0.0.0\n255.0.0.0\n255.128.0.0.0\n255.192.0.0.0\n255.224.0.0.0\n255.240.0.0.0\n255.248.0.0.0\n255.252.0.0.0\n255.254.0.0.0\n255.255.0.0.0\n255.255.128.0\n255.255.192.0\n255.255.224.0\n255.255.240.0\n255.255.248.0\n255.255.252.0\n255.255.254.0\n255.255.255.0\n255.255.255.128\n255.255.255.192\n255.255.255.224\n255.255.255.240\n255.255.255.248\n255.255.255.252\n255.255.255.254\n255.255.255.255\n'
+    bits="$(echo "$1" | cut -d'/' -f2)"
+    mask_list='0.0.0.0\n128.0.0.0\n192.0.0.0\n224.0.0.0\n240.0.0.0\n248.0.0.0\n252.0.0.0\n254.0.0.0\n255.0.0.0\n255.128.0.0.0\n255.192.0.0.0\n255.224.0.0.0\n255.240.0.0.0\n255.248.0.0.0\n255.252.0.0.0\n255.254.0.0.0\n255.255.0.0.0\n255.255.128.0\n255.255.192.0\n255.255.224.0\n255.255.240.0\n255.255.248.0\n255.255.252.0\n255.255.254.0\n255.255.255.0\n255.255.255.128\n255.255.255.192\n255.255.255.224\n255.255.255.240\n255.255.255.248\n255.255.255.252\n255.255.255.254\n255.255.255.255\n'
 
-    printf "$masks" | sed -n "$(expr "$bits" + 1)"p
+    printf "$mask_list" | sed -n "$(expr "$bits" + 1)"p
 }
 
 #######################################

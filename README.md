@@ -20,12 +20,15 @@ $ setup_sd /dev/mmcblk0
 
 SSH to the Pi and:
 ```console
-# ./install
-# reboot
+$ su
+# ./arch_pi/install
+# exit
+$ ./arch_pi/install
+$ sudo reboot
 ```
 
 After reboot, set up Docker containers:
 ```console
-$ cd /home/user/docker
+$ cd docker
 $ ./update container_name
 ```
