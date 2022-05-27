@@ -90,18 +90,17 @@ install_wireguard() {
 
     # Gen "server" peer priv/pub keys
 	wg genkey \
-        | (umask 0077 && sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.private.key") \
+        | sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.private.key" \
         | wg pubkey \
         | sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.public.key" >/dev/null
 
     # "Server" peer variables
-    srv_ip="$(echo "$CONFIG_WIREGUARD_SUBNET" | cut -d'.' -f1-3).1"
-    srv_priv_key="$(sudo cat "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.private.key")"
+    srv_addr="$(echo "$CONFIG_WIREGUARD_SUBNET" | sed 's/.\//1\//')"
     srv_pub_key="$(sudo cat "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/server/$CONFIG_SERVER_HOSTNAME.public.key")"
 
     # Create "server" peer conf
-    printf '[Interface]\nAddress = %s\nListenPort = 51820\nPrivateKey = %s\n\n' \
-        "$srv_ip" "$srv_priv_key" \
+    printf '[Interface]\nAddress = %s\nListenPort = 51820\nPostUp = wg set %%i private-key /etc/wireguard/%s/server/%s.private.key\n\nPostUp = iptables -A INPUT -i %s -p udp --dport 51820 -m state --state NEW -j ACCEPT\nPostUp = iptables -A FORWARD -i %%i -j ACCEPT\nPostUp = iptables -A FORWARD -o %%i -j ACCEPT\nPostUp = iptables -t nat -A POSTROUTING -o %s -j MASQUERADE\n\nPostDown = iptables -D INPUT -i %s -p udp --dport 51820 -m state --state NEW -j ACCEPT\nPostDown = iptables -D FORWARD -i %%i -j ACCEPT\nPostDown = iptables -D FORWARD -o %%i -j ACCEPT\nPostDown = iptables -t nat -D POSTROUTING -o %s -j MASQUERADE\n\n' \
+        "$srv_addr" "$CONFIG_SERVER_HOSTNAME" "$CONFIG_SERVER_HOSTNAME" "$CONFIG_LAN_INTERFACE" "$CONFIG_LAN_INTERFACE" "$CONFIG_LAN_INTERFACE" "$CONFIG_LAN_INTERFACE" \
         | sudo tee /etc/wireguard/wg0.conf >/dev/null
 
     # Create "client" peers
@@ -111,7 +110,7 @@ install_wireguard() {
 
         # Gen priv/pub keys + preshared key
         wg genkey \
-            | (umask 0077 && sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.private.key") \
+            | sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.private.key" \
             | wg pubkey \
             | sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.public.key" >/dev/null
         wg genpsk | sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name-$CONFIG_SERVER_HOSTNAME.psk" >/dev/null
@@ -124,25 +123,33 @@ install_wireguard() {
 
         # Add "client" peer to "server" peer config
 
-        printf '[Peer]\n# %s\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s\n\n' \
+        printf '[Peer]\n# %s\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32\n\n' \
             "$peer_name" "$client_pub_key" "$psk" "$client_ip" \
             | sudo tee -a /etc/wireguard/wg0.conf >/dev/null
 
         # Create peer "client" config
 
-        printf '[Interface]\nAddress = %s\nListenPort = 51820\nPrivateKey = %s\nDNS=%s\n\n' \
+        printf '[Interface]\nAddress = %s/32\nListenPort = 51820\nPrivateKey = %s\nDNS=%s\n\n' \
             "$client_ip" "$client_priv_key" "$CONFIG_LAN_IP" \
             | sudo tee "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf" >/dev/null
 
-        printf '[Peer]\n# %s\nPublicKey = %s\nPresharedKey = %s\nEndpoint = %s:%s\nAllowedIPs = %s,%s\n' \
-            "$CONFIG_SERVER_HOSTNAME" "$srv_pub_key" "$psk" "$CONFIG_SERVER_REMOTE_URL" "$CONFIG_WIREGUARD_EXTERNAL_PORT" "$CONFIG_LAN_NETWORK" "$srv_ip" \
+        printf '[Peer]\n# %s\nPublicKey = %s\nPresharedKey = %s\nEndpoint = %s:%s\nAllowedIPs = %s\n' \
+            "$CONFIG_SERVER_HOSTNAME" "$srv_pub_key" "$psk" "$CONFIG_SERVER_REMOTE_URL" "$CONFIG_WIREGUARD_EXTERNAL_PORT" "$CONFIG_WIREGUARD_ROUTES" \
             | sudo tee -a "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf" >/dev/null
 
+        # Generate QR code for config
         sudo qrencode -t ansiutf8 \
             -r "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf" \
             -o "/etc/wireguard/$CONFIG_SERVER_HOSTNAME/clients/$peer_name.conf.png"
     done
 
+    # Update permissions
+    sudo find /etc/wireguard -type d -exec chmod 700 {} \;
+    sudo find /etc/wireguard -type f -exec chmod 600 {} \;
+    sudo chmod ugo+rx /etc/wireguard
+    sudo chmod ugo+r /etc/wireguard/wg0.conf
+
+    # Enable service
     sudo systemctl enable "wg-quick@wg0"
 }
 

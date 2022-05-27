@@ -1,36 +1,20 @@
-*nat
-:PREROUTING ACCEPT [0:0]
-:INPUT ACCEPT [0:0]
-:POSTROUTING ACCEPT [0:0]
-:OUTPUT ACCEPT [0:0]
--A POSTROUTING -s ${CONFIG_WIREGUARD_SUBNET} -o ${CONFIG_LAN_INTERFACE} -j MASQUERADE
-COMMIT
-
 *filter
 :INPUT DROP [0:0]
 :FORWARD DROP [0:0]
 :OUTPUT ACCEPT [0:0]
 
 -A INPUT -i lo -j ACCEPT
--A INPUT -i wg0 -j ACCEPT
 -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 -A INPUT -m state --state INVALID -j DROP
 
 # Accept ICMP type 8 (ping)
 -A INPUT -p icmp -m icmp --icmp-type 8 -m limit --limit 1/second -j ACCEPT
 
-# Allow from WAN
--A INPUT -i ${CONFIG_LAN_INTERFACE} -p udp --dport 51820 -m state --state NEW -j ACCEPT
-
 # Allow from LAN and VPN
 -A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport ssh -m state --state NEW -j ACCEPT
 
 # DHCPD
 -A INPUT -i eth0 -p udp -s 0.0.0.0 --sport bootpc -d 255.255.255.255 --dport bootps -j ACCEPT -m comment --comment "DHCPD"
-
-# WireGuard
--A FORWARD -i wg0 -o ${CONFIG_LAN_INTERFACE} -j ACCEPT
--A FORWARD -i ${CONFIG_LAN_INTERFACE} -o wg0 -j ACCEPT
 
 #
 # Containers
