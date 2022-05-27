@@ -8,29 +8,26 @@ main() {
     [ "$#" -eq 1 ] || { err "Error: one argument expected, ${#} received"; err "$USAGE"; return 1; }
     [ "$(id -u)" -ne 0 ] || { err 'Do NOT run as root'; return 2; }
 
-    readonly container="$(echo "$1" | sed 's:/*$::')"
+    readonly container="$(echo "$1" | sed 's/\/$//')"
 
     # Does the compose-file exist?
-    [ -f "$container/docker-compose.yml" ] || { err 'Error: docker-compose not found', return 3; }
+    [ -f "$container/docker-compose.yml" ] || { err "Error: docker-compose file '$container/docker-compose.yml' not found", return 3; }
     cd "$container"
 
-	# Since we're removing the container, pihole's DNS serve (127.0.0.1:53) will be down
+	# Since we're removing the container, pihole's DNS server will be down
 	[ "$container" = 'pihole' ] \
 		&& printf 'nameserver 1.1.1.1\nnameserver 1.0.0.1\n' | sudo tee /etc/resolv.conf >/dev/null
 
     # Stop
-    sudo docker ps | grep "$container" \
-        && sudo docker stop "$container"
-
-    # Remove
-    sudo docker ps -a | grep "$container" \
-        && sudo docker rm "$container"
+    sudo docker-compose down --rmi local --remove-orphans
 
     # Update and start
     sudo docker-compose pull
     sudo docker-compose up --detach
 
-	printf 'nameserver 127.0.0.1\noptions trust-ad\n' | sudo tee /etc/resolv.conf >/dev/null
+    # Restore
+    [ "$container" = 'pihole' ] \
+	    && printf 'nameserver 127.0.0.1\noptions trust-ad\n' | sudo tee /etc/resolv.conf >/dev/null
 }
 
 #######################################
