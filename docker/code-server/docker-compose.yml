@@ -19,7 +19,6 @@ services:
       - './etc-codeserver/:/config'
       - '/home/${CONFIG_USER_NAME}/Dev/:/app/Dev:rw'
       - '/home/${CONFIG_USER_NAME}/docker/homer/config.yml:/app/homer-config.yml:rw'
-      - '/home/${CONFIG_USER_NAME}/docker/wireguard/config/:/app/wireguard:rw'
     ports:
       - 50104:8443
     restart: unless-stopped
