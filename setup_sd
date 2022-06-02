@@ -61,21 +61,27 @@ partition_device() {
     printf '\nWiping and partitioning device %s...\n' "$dev"
 
     # Wipe existing partitions
-    sudo wipefs --all --force "$dev"p1 >/dev/null || true
-    sudo wipefs --all --force "$dev"p2 >/dev/null || true
-    sudo wipefs --all --force "$dev" >/dev/null
+    for p in 1 2 p1 p2 ''; do
+        sudo wipefs --all --force "$dev""$p" >/dev/null 2>&1 || true
+    done
 
     # Repartition and format
     cat "$path/fdisk.txt" | sudo fdisk "$dev" >/dev/null
-    sudo mkfs.vfat "$dev"p1 >/dev/null
-    sudo mkfs.btrfs -f "$dev"p2 >/dev/null
+
+    # Device: sd card or usb?
+    [ -e "$dev"p1 ] \
+        && readonly part_prefix='p' \
+        || readonly part_prefix=''
+
+    sudo mkfs.vfat "$dev""$part_prefix"1 >/dev/null
+    sudo mkfs.btrfs -f "$dev""$part_prefix"2 >/dev/null
 
     # Mount
     mkdir -p mnt
-    sudo mount "$dev"p2 mnt
+    sudo mount "$dev""$part_prefix"2 mnt
 
     sudo mkdir -p mnt/boot
-    sudo mount "$dev"p1 mnt/boot
+    sudo mount "$dev""$part_prefix"1 mnt/boot
 }
 
 # Fetch iso, verify and write to device
@@ -185,7 +191,6 @@ setup_dhcp() {
     done | sudo tee -a "mnt/home/$CONFIG_USER_NAME/arch_pi/root/etc/dhcpd.conf" >/dev/null
 
     # Copy config and enable
-    sudo mv mnt/etc/dhcpd.conf mnt/etc/dhcpd.conf.bak
     sudo cp "mnt/home/$CONFIG_USER_NAME/arch_pi/root/etc/dhcpd.conf" mnt/etc/
     sudo ln -sf ../../../../usr/lib/systemd/system/dhcpd4.service mnt/etc/systemd/system/multi-user.target.wants/dhcpd4.service
 }
