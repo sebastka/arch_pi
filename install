@@ -175,9 +175,7 @@ install_docker() {
     sudo systemctl enable docker # Reboot is needed before it can start
 
     # Some containers require an initial setup
-    find /home/"$CONFIG_USER_NAME"/docker/*/prepare.sh | while read f; do
-        . "$f"
-    done
+    find /home/"$CONFIG_USER_NAME"/docker -name prepare.sh -exec ./{} \;
 
     # Terminate
     printf '\nAfter reboot, run "~/docker/update x" to get the x container started.\n'
