@@ -42,22 +42,18 @@ main() {
 
 # Load env
 load_env() {
-    set -a;
-    
-    . "$path/.env"
+    set -a; . "$path/.env"; set +a;
 
     # DHCP
-    CONFIG_DHCP_NID="$(echo "$CONFIG_DHCP_SUBNET" | cut -d'/' -f1)"
-    CONFIG_DHCP_MASK="$(cidr2mask "$CONFIG_DHCP_SUBNET")"
+    export CONFIG_DHCP_NID="$(echo "$CONFIG_DHCP_SUBNET" | cut -d'/' -f1)"
+    export CONFIG_DHCP_MASK="$(cidr2mask "$CONFIG_DHCP_SUBNET")"
 
     # WireGuard
-    CONFIG_WIREGUAR_GATEWAY="$(echo "$CONFIG_WIREGUARD_SUBNET" | cut -d'.' -f1-3).1"
+    export CONFIG_WIREGUAR_GATEWAY="$(echo "$CONFIG_WIREGUARD_SUBNET" | cut -d'.' -f1-3).1"
 
     # Docker: UID/GID
-    CONFIG_USER_UID='1000'
-    CONFIG_USER_GID='1000'
-
-    set +a
+    export CONFIG_USER_UID='1000'
+    export CONFIG_USER_GID='1000'
 }
 
 # Wipe old partitions, repartition and mount
@@ -180,25 +176,16 @@ setup_network() {
 }
 
 setup_dhcp() {
-    sudo mv mnt/etc/dhcpd.conf mnt/etc/dhcpd.conf.bak
-
-    printf '%s\n' "$CONFIG_DHCP_SERVICELESS_SUBNETS" | tr -s ',' '\n' | while read network; do
-
-        nid="$(echo "$network" | cut -d'/' -f1)"
-        mask="$(cidr2mask "$network")"
-
-        printf '# %s\nsubnet %s netmask %s {\n}\n\n' \
-            "$network" "$nid" "$mask"
-    done | sudo tee -a "mnt/home/$CONFIG_USER_NAME/arch_pi/root/etc/dhcpd.conf" >/dev/null
-
     printf "$CONFIG_DHCP_LEASES" \
         | sed 's/,/ /g' \
+        | tr [:upper:] [:lower:] \
         | while read mac ip hostname; do
         printf 'host %s {\n  hardware ethernet %s;\n  fixed-address %s;\n  option host-name "%s";\n}\n\n' \
             "$hostname" "$mac" "$ip" "$hostname"
     done | sudo tee -a "mnt/home/$CONFIG_USER_NAME/arch_pi/root/etc/dhcpd.conf" >/dev/null
 
     # Copy config and enable
+    sudo mv mnt/etc/dhcpd.conf mnt/etc/dhcpd.conf.bak
     sudo cp "mnt/home/$CONFIG_USER_NAME/arch_pi/root/etc/dhcpd.conf" mnt/etc/
     sudo ln -sf ../../../../usr/lib/systemd/system/dhcpd4.service mnt/etc/systemd/system/multi-user.target.wants/dhcpd4.service
 }
@@ -303,7 +290,7 @@ env_replace() {
 # 255.255.255.0
 cidr2mask() {
     bits="$(echo "$1" | cut -d'/' -f2)"
-    mask_list='0.0.0.0\n128.0.0.0\n192.0.0.0\n224.0.0.0\n240.0.0.0\n248.0.0.0\n252.0.0.0\n254.0.0.0\n255.0.0.0\n255.128.0.0.0\n255.192.0.0.0\n255.224.0.0.0\n255.240.0.0.0\n255.248.0.0.0\n255.252.0.0.0\n255.254.0.0.0\n255.255.0.0.0\n255.255.128.0\n255.255.192.0\n255.255.224.0\n255.255.240.0\n255.255.248.0\n255.255.252.0\n255.255.254.0\n255.255.255.0\n255.255.255.128\n255.255.255.192\n255.255.255.224\n255.255.255.240\n255.255.255.248\n255.255.255.252\n255.255.255.254\n255.255.255.255\n'
+    mask_list='0.0.0.0\n128.0.0.0\n192.0.0.0\n224.0.0.0\n240.0.0.0\n248.0.0.0\n252.0.0.0\n254.0.0.0\n255.0.0.0\n255.128.0.0\n255.192.0.0\n255.224.0.0\n255.240.0.0\n255.248.0.0\n255.252.0.0\n255.254.0.0\n255.255.0.0\n255.255.128.0\n255.255.192.0\n255.255.224.0\n255.255.240.0\n255.255.248.0\n255.255.252.0\n255.255.254.0\n255.255.255.0\n255.255.255.128\n255.255.255.192\n255.255.255.224\n255.255.255.240\n255.255.255.248\n255.255.255.252\n255.255.255.254\n255.255.255.255\n'
 
     printf "$mask_list" | sed -n "$(expr "$bits" + 1)"p
 }
