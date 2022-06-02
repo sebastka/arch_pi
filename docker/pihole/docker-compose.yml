@@ -33,7 +33,7 @@ services:
       WEBPASSWORD: '${CONFIG_PIHOLE_PW}' # http://pi.hole/admin password. Run docker logs pihole | grep random to find your random pass.
       PIHOLE_DNS_: '172.28.0.2;172.28.0.2' # Upstream DNS server(s) for Pi-hole to forward queries to, seperated by a semicolon (supports non-standard ports with #[port number]) e.g 127.0.0.1#5053;8.8.8.8;8.8.4.4
       #DNSSEC: 'false' # Enable DNSSEC support (Unnecessary when using unbound with dnssec support)
-      #DNS_BOGUS_PRIV: 'true' # Enable forwarding of reverse lookups for private ranges
+      DNS_BOGUS_PRIV: 'false' # Never forward reverse lookups for private ranges
       DNS_FQDN_REQUIRED: 'false' # Never forward non-FQDNs
       REV_SERVER: 'true' # Enable DNS conditional forwarding for device name resolution
       REV_SERVER_DOMAIN: '${CONFIG_DHCP_DOMAIN}' # If conditional forwarding is enabled, set the domain of the local network router
