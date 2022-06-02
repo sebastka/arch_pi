@@ -35,10 +35,10 @@ services:
       #DNSSEC: 'false' # Enable DNSSEC support (Unnecessary when using unbound with dnssec support)
       #DNS_BOGUS_PRIV: 'true' # Enable forwarding of reverse lookups for private ranges
       DNS_FQDN_REQUIRED: 'false' # Never forward non-FQDNs
-      #REV_SERVER: 'false' # Enable DNS conditional forwarding for device name resolution
-      #REV_SERVER_DOMAIN: '' # If conditional forwarding is enabled, set the domain of the local network router
-      #REV_SERVER_TARGET: '' # If conditional forwarding is enabled, set the IP of the local network router
-      #REV_SERVER_CIDR: '' # If conditional forwarding is enabled, set the reverse DNS zone (e.g. 192.168.0.0/24)
+      REV_SERVER: 'true' # Enable DNS conditional forwarding for device name resolution
+      REV_SERVER_DOMAIN: '${CONFIG_DHCP_DOMAIN}' # If conditional forwarding is enabled, set the domain of the local network router
+      REV_SERVER_TARGET: ${CONFIG_LAN_IP}'' # If conditional forwarding is enabled, set the IP of the local network router
+      REV_SERVER_CIDR: '${CONFIG_DHCP_SUBNET}' # If conditional forwarding is enabled, set the reverse DNS zone (e.g. 192.168.0.0/24)
       #ServerIP: '172.28.0.3' # --net=host mode requires! Set to your server's LAN IP, used by web block modes and lighttpd bind address
       #ServerIPv6: '' # If you have a v6 network set to your server's LAN IPv6 to block IPv6 ads fully
       #VIRTUAL_HOST: '${CONFIG_SERVER_HOSTNAME}' # What your web server 'virtual host' is, accessing admin through this Hostname/IP allows you to make changes to the whitelist / blacklists in addition to the default 'http://pi.hole/admin/' address
