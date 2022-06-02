@@ -45,6 +45,9 @@ init() {
 
     printf '\nInitialize...\n'
 
+    # Disable wlan0
+    ip link set wlan0 down
+
     # Locale
     timedatectl set-ntp true
     locale-gen
