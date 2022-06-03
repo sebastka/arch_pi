@@ -109,12 +109,12 @@ install_wireguard() {
             | sudo tee /etc/wireguard/wg0.conf >/dev/null
 
     # "Server" peer config: create "client" peer template
-    cat "$path/root/etc/wireguard/wg0.conf.d/server/peer.template.conf" \
+    sudo cat "$path/root/etc/wireguard/wg0.conf.d/server/peer.template.conf" \
             | envsubst "$SUBST_VARS" \
             | sudo tee /etc/wireguard/wg0.conf.d/server/peer.template.conf
 
     # "Client" peer config: create template config
-    cat "$path/root/etc/wireguard/wg0.conf.d/clients/peer.template.conf" \
+    sudo cat "$path/root/etc/wireguard/wg0.conf.d/clients/peer.template.conf" \
             | envsubst "$SUBST_VARS" \
             | sudo tee /etc/wireguard/wg0.conf.d/clients/peer.template.conf
 
@@ -142,12 +142,12 @@ install_wireguard() {
         SUBST_VARS='$WG_PEER_NAME,$WG_PEER_NB,$WG_PEER_PRIVKEY,$WG_PEER_PUBKEY,$WG_PSK,$WG_EXTRA_ROUTES'
 
         # Server conf: add peer
-        cat /etc/wireguard/wg0.conf.d/server/peer.template.conf \
+        sudo cat /etc/wireguard/wg0.conf.d/server/peer.template.conf \
             | envsubst "$SUBST_VARS" \
             | sudo tee -a /etc/wireguard/wg0.conf >/dev/null
 
         # Client conf: create
-        cat /etc/wireguard/wg0.conf.d/clients/peer.template.conf \
+        sudo cat /etc/wireguard/wg0.conf.d/clients/peer.template.conf \
             | envsubst "$SUBST_VARS" \
             | sudo tee "/etc/wireguard/wg0.conf.d/clients/$peer_name.conf" >/dev/null
 
