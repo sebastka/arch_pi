@@ -20,8 +20,8 @@
 # Containers
 #
 
-# Homer (Dashboard)
--A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport http -m state --state NEW -j ACCEPT -m comment --comment "Homer (webui)"
+# Homarr (Dashboard)
+-A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport http -m state --state NEW -j ACCEPT -m comment --comment "Homarr (webui)"
 
 # Pihole
 -A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport 50100 -m state --state NEW -j ACCEPT -m comment --comment "Pihole (webui)"

@@ -1,0 +1,16 @@
+version: '3'
+
+## https://github.com/ajnart/homarr
+services:
+  homarr:
+    container_name: homarr
+    image: ghcr.io/ajnart/homarr:latest
+    environment:
+      UID: ${CONFIG_USER_UID}
+      GID: ${CONFIG_USER_GID}
+      TZ: ${CONFIG_SYSTEM_REGION}
+    volumes:
+      - ./configs:/app/data/configs
+    ports:
+      - 80:7575
+    restart: unless-stopped

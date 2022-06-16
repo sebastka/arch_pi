@@ -1,0 +1,91 @@
+{
+  "name": "default",
+  "services": [
+    {
+      "id": "3d8c0491-6e08-4f16-97bf-57195953df95",
+      "type": "Other",
+      "category": "Network",
+      "name": "PiHole",
+      "icon": "https://cdn.jsdelivr.net/gh/walkxhub/dashboard-icons/png/pihole.png",
+      "url": "http://${CONFIG_LAN_IP}:50100/admin/"
+    },
+    {
+      "id": "99b85507-31d6-4866-a2c1-1486cb3147b8",
+      "type": "Other",
+      "category": "Dev",
+      "name": "Code-Server",
+      "icon": "https://cdn.jsdelivr.net/gh/walkxhub/dashboard-icons/png/code.png",
+      "url": "http://${CONFIG_LAN_IP}:50104/"
+    },
+    {
+      "id": "9199192f-c5dc-4da9-bd1f-029415f0d55a",
+      "type": "Other",
+      "category": "Network",
+      "name": "Uptime Kuma",
+      "icon": "https://cdn.jsdelivr.net/gh/walkxhub/dashboard-icons/png/uptime-kuma.png",
+      "url": "http://${CONFIG_LAN_IP}:50102/"
+    },
+    {
+      "id": "6f5d4921-4061-41c3-8eb9-e9ff89b8b7dd",
+      "type": "Other",
+      "category": "Network",
+      "name": "Portainer",
+      "icon": "https://cdn.jsdelivr.net/gh/walkxhub/dashboard-icons/png/portainer.png",
+      "url": "https://${CONFIG_LAN_IP}:50105/"
+    },
+    {
+      "id": "3f99c92b-adbc-407c-893a-eb75ccfd6e05",
+      "type": "Other",
+      "category": "Karlsen",
+      "name": "Public Home",
+      "icon": "https://www.karlsen.fr/favicon.png",
+      "url": "https://www.karlsen.fr"
+    },
+    {
+      "id": "cbbb7b85-9437-4986-8361-f5cc9c5fde3d",
+      "type": "Other",
+      "category": "Karlsen",
+      "name": "Webmail",
+      "icon": "https://taylor.mxrouting.net/webmail/skins/elastic/images/logo.svg",
+      "url": "https://webmail.karlsen.fr"
+    }
+  ],
+  "settings": {
+    "searchUrl": "https://google.com/search?q=",
+    "title": "HomeLab",
+    "logo": "imgs/logo.png"
+  },
+  "modules": {
+    "Calendar": {
+      "enabled": true
+    },
+    "Torrent": {
+      "enabled": true
+    },
+    "Search Bar": {
+      "enabled": true
+    },
+    "Weather": {
+      "enabled": true,
+      "options": {
+        "location": {
+          "value": "Trondheim"
+        }
+      }
+    },
+    "Date": {
+      "enabled": true,
+      "options": {
+        "full": {
+          "value": true
+        }
+      }
+    },
+    "Ping Services": {
+      "enabled": false
+    },
+    "Download Speed": {
+      "enabled": true
+    }
+  }
+}
