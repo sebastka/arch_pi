@@ -1,0 +1,36 @@
+version: "2"
+
+## https://hub.docker.com/r/tzahi12345/youtubedl-material
+services:
+  ytdl-mongo-db:
+    container_name: ytdl-mongo-db
+    image: mongo:4.4.14 # >= 5 do not work on arm yet
+    environment:
+      UID: ${CONFIG_USER_UID}
+      GID: ${CONFIG_USER_GID}
+      TZ: ${CONFIG_SYSTEM_REGION}
+    volumes:
+      - ./db/:/data/db
+    restart: unless-stopped
+  ytdl-material:
+    container_name: ytdl-material
+    image: tzahi12345/youtubedl-material:nightly
+    environment:
+      UID: ${CONFIG_USER_UID}
+      GID: ${CONFIG_USER_GID}
+      TZ: ${CONFIG_SYSTEM_REGION}
+      ALLOW_CONFIG_MUTATIONS: 'true'
+      ytdl_mongodb_connection_string: 'mongodb://ytdl-mongo-db:27017'
+      ytdl_use_local_db: 'false'
+      write_ytdl_config: 'true'
+    depends_on:
+      - ytdl-mongo-db
+    volumes:
+      - ./appdata:/app/appdata
+      - ./audio:/app/audio
+      - ./video:/app/video
+      - ./subscriptions:/app/subscriptions
+      - ./users:/app/users
+    ports:
+      - 50101:17442
+    restart: unless-stopped

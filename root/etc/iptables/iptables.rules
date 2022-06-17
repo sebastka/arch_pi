@@ -28,6 +28,9 @@
 -A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport domain -m state --state NEW -j ACCEPT -m comment --comment "Pihole (dns)"
 -A INPUT -p udp -s ${CONFIG_TRUSTED_NETWORKS} --dport domain -m state --state NEW -j ACCEPT -m comment --comment "Pihole (dns)"
 
+# Youtube-dl Material
+-A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport 50101 -m state --state NEW -j ACCEPT -m comment --comment "ytdl-material (webui)"
+
 # Uptime-kuma
 -A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport 50102 -m state --state NEW -j ACCEPT -m comment --comment "Uptime-Kuma (webui)"
 
