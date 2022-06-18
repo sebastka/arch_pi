@@ -61,13 +61,13 @@
       "id": "7c6eb277-636c-45e2-8b97-88610fcd087d",
       "type": "Other",
       "category": "Network",
-      "name": "SearX",
-      "icon": "http://${CONFIG_LAN_IP}:50106/static/themes/oscar/img/logo_searx_a.png",
-      "url": "http://${CONFIG_LAN_IP}:50106"
+      "name": "SearXNG",
+      "icon": "http://${CONFIG_LAN_IP}:50103/static/themes/simple/img/searxng.png",
+      "url": "http://${CONFIG_LAN_IP}:50103"
     }
   ],
   "settings": {
-    "searchUrl": "http://${CONFIG_LAN_IP}:50106/search?categories=general&language=en-US&q=",
+    "searchUrl": "http://${CONFIG_LAN_IP}:50103/search?language=en-US&time_range=None&safesearch=0&categories=general&q=",
     "title": "HomeLab",
     "logo": "imgs/logo.png",
     "widgetPosition": "right"

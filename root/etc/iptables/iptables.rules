@@ -34,17 +34,13 @@
 # Uptime-kuma
 -A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport 50102 -m state --state NEW -j ACCEPT -m comment --comment "Uptime-Kuma (webui)"
 
-# ?
-# -A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport 50103 -m state --state NEW -j ACCEPT -m comment --comment "?"
+# SearXNG
+-A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport 50103 -m state --state NEW -j ACCEPT -m comment --comment "SearXNG (webui)"
 
 # Code-server
 -A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport 50104 -m state --state NEW -j ACCEPT -m comment --comment "Code server (webui)"
 
 # Portainer
 -A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport 50105 -m state --state NEW -j ACCEPT -m comment --comment "Portainer-ce (webui)"
-
-# Searx
--A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport 50106 -m state --state NEW -j ACCEPT -m comment --comment "Searx (webui)"
--A INPUT -p tcp -s ${CONFIG_TRUSTED_NETWORKS} --dport 50107 -m state --state NEW -j ACCEPT -m comment --comment "Searx (morty)"
 
 COMMIT

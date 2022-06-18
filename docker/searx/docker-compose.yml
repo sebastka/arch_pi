@@ -1,26 +1,42 @@
 version: '3.7'
 
 services:
-  searx:
-    container_name: searx
-    build: https://github.com/searx/searx.git
+  redis:
+    container_name: redis
+    image: "redis:alpine"
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    command: redis-server --save "" --appendonly "no"
     env_file:
       - ../common.env
-      - ./searx.env
-    ports:
-      - 50106:8080
-    volumes:
-      - ./searx:/etc/searx:rw
+    tmpfs:
+      - /var/lib/redis
     restart: unless-stopped
 
-  morty:
-    container_name: morty
-    image: dalf/morty
+  searxng:
+    container_name: searxng
+    image: searxng/searxng:latest
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
     env_file:
       - ../common.env
       - ./searx.env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+    volumes:
+      - ./searxng:/etc/searxng:rw
     ports:
-      - 50107:3000
-    command: -timeout 6 -ipv6
-    read_only: true
+     - 50103:8080
     restart: unless-stopped
