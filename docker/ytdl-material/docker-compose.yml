@@ -4,7 +4,7 @@ version: "2"
 services:
   ytdl-mongo-db:
     container_name: ytdl-mongo-db
-    image: mongo:4.4.14 # >= 5 do not work on arm yet
+    image: mongo:4.4.14 # >= 5 do not work on pi4b yet
     environment:
       UID: ${CONFIG_USER_UID}
       GID: ${CONFIG_USER_GID}
