@@ -29,7 +29,7 @@ services:
       - DAC_OVERRIDE
     env_file:
       - ../common.env
-      - ./searx.env
+      - ./searxng.env
     logging:
       driver: "json-file"
       options:
