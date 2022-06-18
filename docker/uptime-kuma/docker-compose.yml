@@ -1,12 +1,12 @@
-version: "2.1"
+version: "3"
 
 ## https://github.com/louislam/uptime-kuma
 services:
   uptime-kuma:
     container_name: uptime-kuma
     image: louislam/uptime-kuma:1
-    environment:
-      TZ: ${CONFIG_SYSTEM_REGION}
+    env_file:
+      - ../common.env
     volumes:
       - './etc-uptimekuma/:/app/data'
     ports:

@@ -5,12 +5,10 @@ services:
   homarr:
     container_name: homarr
     image: ghcr.io/ajnart/homarr:latest
-    environment:
-      UID: ${CONFIG_USER_UID}
-      GID: ${CONFIG_USER_GID}
-      TZ: ${CONFIG_SYSTEM_REGION}
+    env_file:
+      - ../common.env
     volumes:
-      - ./configs:/app/data/configs
+      - ./config.json:/app/data/configs/default.json
     ports:
       - 80:7575
     restart: unless-stopped

@@ -38,7 +38,7 @@
       "type": "Other",
       "category": "Karlsen",
       "name": "Public Home",
-      "icon": "https://www.karlsen.fr/favicon.png",
+      "icon": "https://www.karlsen.fr/icons/favicon.png",
       "url": "https://www.karlsen.fr"
     },
     {
@@ -48,12 +48,29 @@
       "name": "Webmail",
       "icon": "https://taylor.mxrouting.net/webmail/skins/elastic/images/logo.svg",
       "url": "https://webmail.karlsen.fr"
+    },
+    {
+      "id": "ebbe081a-e421-4e05-9a11-331151818acb",
+      "type": "Other",
+      "category": "Media",
+      "name": "YoutubeDL-Material",
+      "icon": "https://cdn.jsdelivr.net/gh/walkxhub/dashboard-icons/png/youtube.png",
+      "url": "http://${CONFIG_LAN_IP}:50101/"
+    },
+    {
+      "id": "7c6eb277-636c-45e2-8b97-88610fcd087d",
+      "type": "Other",
+      "category": "Network",
+      "name": "SearX",
+      "icon": "http://${CONFIG_LAN_IP}:50106/static/themes/oscar/img/logo_searx_a.png",
+      "url": "http://${CONFIG_LAN_IP}:50106"
     }
   ],
   "settings": {
-    "searchUrl": "https://google.com/search?q=",
+    "searchUrl": "http://${CONFIG_LAN_IP}:50106/search?categories=general&language=en-US&q=",
     "title": "HomeLab",
-    "logo": "imgs/logo.png"
+    "logo": "imgs/logo.png",
+    "widgetPosition": "right"
   },
   "modules": {
     "Calendar": {
