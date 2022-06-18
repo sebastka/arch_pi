@@ -1,0 +1,26 @@
+version: '3.7'
+
+services:
+  searx:
+    container_name: searx
+    build: https://github.com/searx/searx.git
+    env_file:
+      - ../common.env
+      - ./searx.env
+    ports:
+      - 50106:8080
+    volumes:
+      - ./searx:/etc/searx:rw
+    restart: unless-stopped
+
+  morty:
+    container_name: morty
+    image: dalf/morty
+    env_file:
+      - ../common.env
+      - ./searx.env
+    ports:
+      - 50107:3000
+    command: -timeout 6 -ipv6
+    read_only: true
+    restart: unless-stopped
