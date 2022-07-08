@@ -24,7 +24,7 @@ main() {
     # Update and start
     sudo docker-compose pull
     sudo docker-compose up --detach
-    sudo docker system prune -f
+    sudo docker system prune --all --force
 
     # Restore
     [ "$container" = 'pihole' ] \
