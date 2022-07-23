@@ -24,6 +24,7 @@ main() {
     init
     install_base
     install_wireguard
+    install_nfs
     install_docker
 
     printf '\nDone. Please reboot\n'
@@ -165,6 +166,51 @@ install_wireguard() {
 
     # Enable service
     sudo systemctl enable wg-quick@wg0
+}
+
+# Setup NFS
+install_nfs() {
+    sudo pacman -S --noconfirm --needed nfs-utils
+
+    # Helper function
+    get_opts() {
+        printf '%s,\n' "$share_to" \
+            | sed "s/,/($options) /g" \
+            | sed 's/ $//'
+    }
+
+    # Set up shares from config
+    printf $CONFIG_NFS | while read line; do
+        name="$(echo "$line" | cut -d',' -f1)"
+        share_to="$(echo "$line" | cut -d',' -f2-)"
+
+        mkdir -p "/home/$CONFIG_USER_NAME/nfs/$name"
+        sudo mkdir -p "/mnt/nfs/$name"
+
+        sudo mount --bind "/home/$CONFIG_USER_NAME/nfs/$name" "/mnt/nfs/$name"
+
+        # Add mount to fstab
+        printf '/home/%s/nfs/%s\t/mnt/nfs/%s\tnone\tbind\t0\t0\n' "$CONFIG_USER_NAME" "$name" "$name" \
+            | sudo tee -a /etc/fstab >/dev/null
+
+        # If /etc/exports is empty, export /mnt/nfs
+        if [ -z "$(sed '/^#/d' /etc/exports)" ]; then
+            options="rw,sync,no_subtree_check,crossmnt,fsid=$(id -u)"
+
+            printf '/mnt/nfs\t%s\n' "$(get_opts)" \
+                | sudo tee -a /etc/exports >/dev/null
+        fi
+
+        # Export /mnt/nfs/x
+        options='rw,sync,no_subtree_check'
+        printf '/mnt/nfs/%s\t%s\n' "$name" "$(get_opts)" \
+            | sudo tee -a /etc/exports >/dev/null
+
+        # On client /etc/fstab:
+        # CONFIG_LAN_IP:/mnt/nfs/$name /mnt/point nfs _netdev,noauto,user,x-systemd.automount,x-systemd.mount-timeout=10,timeo=14,x-systemd.idle-timeout=1min    0 0
+    done
+
+    sudo systemctl enable nfs-server.service
 }
 
 # Setup Docker
