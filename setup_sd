@@ -48,9 +48,6 @@ load_env() {
     export CONFIG_DHCP_NID="$(echo "$CONFIG_DHCP_SUBNET" | cut -d'/' -f1)"
     export CONFIG_DHCP_MASK="$(cidr2mask "$CONFIG_DHCP_SUBNET")"
 
-    # WireGuard
-    export CONFIG_WIREGUAR_GATEWAY="$(echo "$CONFIG_WIREGUARD_SUBNET" | cut -d'.' -f1-3).1"
-
     # Docker: UID/GID
     export CONFIG_USER_UID='1000'
     export CONFIG_USER_GID='1000'
